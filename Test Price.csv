@@ -1,0 +1,250 @@
+Sl,Test Code,Test Type,Test Name, Price 
+1,IRN,Biochemical Tests,S.Iron Profile," 3,000.00 "
+2,FER,Biochemical Tests,S.Ferritin," 1,200.00 "
+3,ELC,Biochemical Tests,S.Electrolytes," 1,000.00 "
+4,STB,Biochemical Tests,S.TIBC," 1,000.00 "
+5,AML,Biochemical Tests,S.Amylase," 1,000.00 "
+6,LIP,Biochemical Tests,S.Lipase," 1,000.00 "
+7,ALD,Biochemical Tests,S.Aldolase," 1,000.00 "
+8,PHS,Biochemical Tests,S.Phosphate (PO4) /Inorganic Phosphate, 600.00 
+9,UAM,Biochemical Tests,Urine Amylase (Spot Urine)," 1,000.00 "
+10,URT,Biochemical Tests,Urethral Discharge for gram stain, 600.00 
+11,MAG,Biochemical Tests,S.Magnesium," 1,000.00 "
+12,RBS,Blood Sugar,RBS, 150.00 
+13,FBS,Blood Sugar,FBS, 150.00 
+14,2BS,Blood Sugar,BS (2hrs after Breakfast), 150.00 
+15,HBA,Blood Sugar,HbA1c (EDTA Tube-2 mL whole Blood)," 1,200.00 "
+16,OGT,Blood Sugar,OGTT, 300.00 
+17,SER,Blood Sugar,Serum Uric Acid, 500.00 
+18,CRT,Blood Sugar,S.Creatinine, 400.00 
+19,TRP,Cardiology,Troponin-I," 1,200.00 "
+20,CPK,Cardiology,S.CPK," 1,000.00 "
+21,CKM,Cardiology,S.CK- MB," 1,000.00 "
+22,LDH,Cardiology,S.LDH," 1,000.00 "
+23,NTBNP,Cardiology,NT-proBNP (Serum / Plasma)," 3,000.00 "
+24,CBC,Hematology Tests,CBC (EDTA Tube-2 mL whole Blood), 600.00 
+25,WBC,Hematology Tests,TC (WBC), 100.00 
+26,DC,Hematology Tests,DC, 150.00 
+27,ESR,Hematology Tests,ESR, 150.00 
+28,HB,Hematology Tests,Hemoglobin (Hb), 150.00 
+29,TCE,Hematology Tests,Total Circulating Esonophil (TCE), 300.00 
+30,BCT,Hematology Tests,BT & CT, 400.00 
+31,PBF,Hematology Tests,PBF (EDTA Tube -2 mL whole Blood), 300.00 
+32,FIB,Hematology Tests,Fibrinogen (Blue top Sodium citrate Tube 2ml whole blood)," 1,200.00 "
+33,DDM,Hematology Tests,D-Dimer (Plasma)," 1,200.00 "
+34,PRT,Hematology Tests,Prothrombin time, 800.00 
+35,APT,Hematology Tests,APTT, 800.00 
+36,HBA,Hematology Tests,HbA1c (EDTA Tube-2 mL whole Blood)," 1,200.00 "
+37,HBE,Hematology Tests,Hb Electrophoresis," 1,500.00 "
+38,PEP,Hematology Tests,Protein Electrophoresis ," 1,500.00 "
+39,HBS,Hepatitis Profile,HBs Ag, 600.00 
+40,HAG,Hepatitis Profile,HBe Ag," 1,000.00 "
+41,AHS,Hepatitis Profile,Anti-HBs," 1,000.00 "
+42,AHB,Hepatitis Profile,Anti-HBe," 1,000.00 "
+43,AHV,Hepatitis Profile,Anti-HCV," 1,000.00 "
+44,AHC,Hepatitis Profile,Anti-HBc IgM," 1,000.00 "
+45,AHA,Hepatitis Profile,Anti-HAV IgM," 1,000.00 "
+46,AHE,Hepatitis Profile,"Anti-HEV IgM, IgG"," 1,000.00 "
+47,HBV,Hepatitis Profile,HBV DNA (Quantitative)," 10,000.00 "
+48,HCV,Hepatitis Profile,HCV RNA (Quantitative) 2ml whole Blood EDTA Tube," 12,000.00 "
+49,FLUI,Histopathology,Fluid for ADA," 1,000.00 "
+50,BSG,Histopathology,"Bio-chemical test: Sugar, Protein", 500.00 
+51,FCS,Histopathology,Microbiological Fluid C/S, 600.00 
+52,PAP,Histopathology,Pap’s Smear / Cervical Smear," 1,000.00 "
+53,TSH,Hormone Test,TSH (Thyroid Stimulating Hormone)," 1,200.00 "
+54,FT3,Hormone Test,FT3 (Free Triiodothyronine)," 1,200.00 "
+55,FT4,Hormone Test,FT4 (Free Thyroxine)," 1,200.00 "
+56,T3,Hormone Test,T3 (Total Triiodothyronine)," 1,000.00 "
+57,T4,Hormone Test,T4 (Total Thyroxine)," 1,000.00 "
+58,T3T,Hormone Test,T3 & TSH," 2,000.00 "
+59,T4T,Hormone Test,T4 & TSH," 2,000.00 "
+60,T34,Hormone Test,T3 T4 TSH (Package)," 2,700.00 "
+61,FSH,Hormone Test,FSH (Follicle Stimulating Hormone)," 1,200.00 "
+62,LH,Hormone Test,LH (Luteinizing Hormone)," 1,200.00 "
+63,LHF,Hormone Test,LH: FS Resiio," 1,500.00 "
+64,PRL,Hormone Test,Prolactin," 1,200.00 "
+65,TST,Hormone Test,Testosterone," 1,200.00 "
+66,FTS,Hormone Test,Free Testosterone," 1,800.00 "
+67,PRG,Hormone Test,Progesterone," 1,200.00 "
+68,EST,Hormone Test,Estradiol / Estrogen /E2," 1,000.00 "
+69,AMH,Hormone Test,Anti Mullerian Hormone (AMH) (Serum)," 3,500.00 "
+70,CAM,Hormone Test,Cortisol (AM)," 1,000.00 "
+71,CPM,Hormone Test,Cortisol (PM)," 1,000.00 "
+72,ATA,Hormone Test,Anti-Thyroid Ab (Anti-TPO & Anti -TG)," 2,000.00 "
+73,ATG,Hormone Test,Anti Thyroglobulin Ab (Anti-TG)," 1,000.00 "
+74,ATT,Hormone Test,Anti-Thyroperoxidase Ab (Anti TPO ab) /Anti microsomal Ab," 1,000.00 "
+75,GRH,Hormone Test,Growth Hormone," 1,000.00 "
+76,PTH,Hormone Test,Para thyroid hormone (PTH)," 1,000.00 "
+77,PCT,Hormone Test,Procalcitonin (Serum / Plasma)," 3,000.00 "
+78,ACT,Hormone Test,ACTH (Plasma) (EDTA Tube -2 mL whole Blood)," 1,000.00 "
+79,AND,Hormone Test,Androgen," 2,800.00 "
+80,HDR,Hormone Test,Hydroxy Progesterone," 2,400.00 "
+81,SIG,Immunology,S.IgG," 1,000.00 "
+82,SIM,Immunology,S.IgM," 1,000.00 "
+83,SIA,Immunology,S.IgA," 1,000.00 "
+84,SIE,Immunology,S.IgE (Immunoglobulin E)," 1,000.00 "
+85,C3,Immunology,C3 (Serum)," 1,000.00 "
+86,C4,Immunology,C4 (Serum)," 1,000.00 "
+87,ANA,Immunology,ANA (Anti Nuclear Antibody)," 1,400.00 "
+88,ANF,Immunology,ANF (Anti Nuclear Factor)," 1,000.00 "
+89,ADS,Immunology,Anti-DS- DNA," 1,200.00 "
+90,ACP,Immunology,Anti-CCP (Anti Cyclic Citrullinated Peptide)," 2,000.00 "
+91,RAT,Immunology,Rh.Antibody Titre (Serum)," 1,000.00 "
+92,CMI,Immunology,Coomb's Test-Indirect (Serum), 700.00 
+93,CMD,Immunology,Coomb's Test-Direct (EDTA Tube -2 mL whole Blood), 500.00 
+94,DNG,Infectious Disease,"Anti Dengue IgG, IgM", 500.00 
+95,NS1,Infectious Disease,Dengue NS1 Antigen, 500.00 
+96,ATB,Infectious Disease,"Anti TB IgG, IgM"," 1,000.00 "
+97,ICM,Infectious Disease,ICT for Malaria (EDTA Tube-2 mL Blood), 800.00 
+98,ICF,Infectious Disease,ICT for Filaria (Serum), 800.00 
+99,ICK,Infectious Disease,ICT for Kala Azar (Serum), 800.00 
+100,ICC,Infectious Disease,ICT for Chikungunya IgG & IgM," 1,400.00 "
+101,AHPG,Infectious Disease,Anti H. Pylori IgG," 1,000.00 "
+102,AHPM,Infectious Disease,Anti H. Pylori IgM," 1,000.00 "
+103,CAG,Infectious Disease,Chlamydia Ab IgG," 1,000.00 "
+104,CHA,Infectious Disease,Chlamydia Ab IgM," 1,000.00 "
+105,STM,Infectious Disease,Salmonella typhi IgM," 1,000.00 "
+106,STG,Infectious Disease,Salmonella typhi IgG," 1,000.00 "
+107,FAG,Infectious Disease,Febrile Antigen," 1,000.00 "
+108,TAG,Infectious Disease,Triple Antigen," 1,000.00 "
+109,ICT,Infectious Disease,ICT Leptospira," 1,000.00 "
+110,BUR,Kidney Profile Test,B.Urea, 300.00 
+111,BUN,Kidney Profile Test,BUN, 300.00 
+112,CRT,Kidney Profile Test,S.Creatinine, 400.00 
+113,URA,Kidney Profile Test,S.Uric Acid, 300.00 
+114,CAC,Kidney Profile Test,S.Calcium (Ca++), 300.00 
+115,ELC,Kidney Profile Test,S.Electrolyte, 600.00 
+116,EGF,Kidney Profile Test,EGFR (Serum)," 1,200.00 "
+117,UKB,Kidney Profile Test,Urine Ketone Bodies (Spot Urine), 300.00 
+118,FLP,Lipid Profile Tests,S.Fasting Lipid Profile," 1,400.00 "
+119,CHL,Lipid Profile Tests,S.Cholesterol, 400.00 
+120,HDL,Lipid Profile Tests,S.HDL, 400.00 
+121,LDL,Lipid Profile Tests,S.LDL (Direct Method), 400.00 
+122,TRG,Lipid Profile Tests,S.Triglyceride (TG), 400.00 
+123,LFT,Liver Function Tests,LFT /LIVER FUNCTION TEST," 1,500.00 "
+124,BIL,Liver Function Tests,S.Bilirubin, 500.00 
+125,SGP,Liver Function Tests,S.SGPT (ALT), 500.00 
+126,SGO,Liver Function Tests,S.SGOT (AST), 500.00 
+127,ALK,Liver Function Tests,S.Alk. Phosphatase, 400.00 
+128,TPR,Liver Function Tests,S.Total Protein, 600.00 
+129,AGR,Liver Function Tests,S.AG Ratio," 1,000.00 "
+130,ALB,Liver Function Tests,S.Albumin, 400.00 
+131,GLB,Liver Function Tests,S.Globulin," 1,000.00 "
+132,BCS,Microbiology,Blood for C/S (with Container)," 1,000.00 "
+133,BFM,Microbiology,Blood for C/S FAN Mathod (with Container)," 1,500.00 "
+134,UCS,Microbiology,Urine for C/S (with Container), 700.00 
+135,SPC,Microbiology,Sputum for C/S, 600.00 
+136,PCS,Microbiology,Pus for C/S, 600.00 
+137,WCS,Microbiology,Wound Swab for C/S, 600.00 
+138,SCS,Microbiology,Stool C/S, 600.00 
+139,ACS,Microbiology,Anorectal Swab For C/S, 700.00 
+140,TCS,Microbiology,Throat for Swab C/S, 600.00 
+141,RCS,Microbiology,Rectal Swab for C/S, 600.00 
+142,FCS,Microbiology,Fluid C/S, 600.00 
+143,APL,Other Tests,"Anti Phospholipid Ab IgG, IgM"," 1,000.00 "
+144,ACL,Other Tests,"Anti Cardiolipin Ab IgG, IgM"," 1,500.00 "
+145,HLA,Other Tests,HLA-B 27 (EDTA Tube -2 mL whole Blood)," 3,600.00 "
+146,ADN,Other Tests,Adenosine deaminase (ADA) (Serum / Fluid)," 1,000.00 "
+147,ENA,Other Tests,ENA Profile," 13,000.00 "
+148,ALKM,Other Tests,Anti LKM-1 / Anti Smooth muscle ab," 1,500.00 "
+149,LIH,Other Tests,S.Lithum," 1,000.00 "
+150,GAM,Other Tests,S.Gamma GT," 1,000.00 "
+151,PCRU,Other Tests,PCR (Urine Protein to Creatinine Ratio) (Sample- Urine), 800.00 
+152,UTP,Other Tests,24 hrs Urine Total Protein (UTP) (Sample- Spot Urine + 24 hrs Total Volume), 800.00 
+153,MCA,Other Tests,Microalbumin (Sample- Spot Urine), 700.00 
+154,ACR,Other Tests,ACR (Albumin Creatinine Ratio) (Sample-Spot Urine), 800.00 
+155,UAL,Other Tests,Urine Albumin, 250.00 
+156,UCR,Other Tests,182 O31 24 Hrs Urine Creatinine (Sample- Spot urine), 500.00 
+157,CCR,Other Tests,CCR (creatinine clearance rate)-Serum &Urine+ Total Volume," 1,000.00 "
+158,AFA,Other Tests,Ascitic Fluid For Albumin," 1,000.00 "
+159,FSI,Other Tests,Fasting Insuling (Serum)," 1,800.00 "
+160,CPP,Other Tests,C-Peptide (Fasting Serum)," 1,600.00 "
+161,F8,Other Tests,Factor VIII (Blue top Sodium citrate Tube 2ml whole blood)," 1,000.00 "
+162,F9,Other Tests,Factor IX (Blue top Sodium citrate Tube 2ml whole blood)," 1,000.00 "
+163,DHS,Other Tests,DHEAS (Serum)," 1,500.00 "
+164,CLP,Other Tests,Ceruloplasmin (Serum)," 1,500.00 "
+165,AMM,Other Tests,Ammonia (EDTA Tube -2 mL whole Blood)," 1,000.00 "
+166,URP,Other Tests,24 Hrs Urine Phosphate, 600.00 
+167,ARN,Other Tests,Anti RNP 70 (Serum)," 2,200.00 "
+168,SPUTM,Other Tests,Sputum Malignant Cell," 1,000.00 "
+169,PLEUA,Other Tests,Pleural Fluid for malignant cell," 1,000.00 "
+170,URC,Other Tests,24 Hrs Urine Calcium (Spot Urine), 700.00 
+171,CBC,Pregnancy Tests,CBC (EDTA Tube-2 mL whole Blood), 600.00 
+172,HB,Pregnancy Tests,Hemoglobin (Hb), 150.00 
+173,HCG,Pregnancy Tests,Beta-hCG, 200.00 
+174,HCG,Pregnancy Tests,hCG, 200.00 
+175,RBS,Pregnancy Tests,RBS, 150.00 
+176,FBS,Pregnancy Tests,FBS, 150.00 
+177,HBA,Pregnancy Tests,HbA1c," 1,200.00 "
+178,CRT,Pregnancy Tests,S.Creatinine, 400.00 
+179,HBG,Pregnancy Tests,HBs Ag, 600.00 
+180,TSH,Pregnancy Tests,TSH (Thyroid Stimulating Hormone)," 1,200.00 "
+181,FT3,Pregnancy Tests,FT3 (Free Triiodothyronine)," 1,200.00 "
+182,FT4,Pregnancy Tests,FT4 (Free Thyroxine)," 1,200.00 "
+183,GRP,Pregnancy Tests,Blood Grouping (EDTA Tube-2 mL whole Blood), 100.00 
+184,USG,Pregnancy Tests,USG of Pregnancy Profile (color), 700.00 
+185,URN,Pregnancy Tests,Urine R/M/E, 150.00 
+186,CBC,Regular,CBC (EDTA Tube-2 mL whole Blood), 600.00 
+187,HB,Regular,Hemoglobin (Hb), 150.00 
+188,RBS,Regular,RBS, 150.00 
+189,FBS,Regular,FBS, 150.00 
+190,CRT,Regular,S.Creatinine, 400.00 
+191,URN,Regular,Urine R/M/E, 150.00 
+192,TSH,Regular,TSH (Thyroid Stimulating Hormone)," 1,200.00 "
+193,FT3,Regular,FT3 (Free Triiodothyronine)," 1,200.00 "
+194,FT4,Regular,FT4 (Free Thyroxine)," 1,200.00 "
+195,ECG,Regular,ECG, 300.00 
+196,ESR,Regular,ESR, 150.00 
+197,URN,Routine Microscopic Test,Urine R/M/E, 150.00 
+198,STL,Routine Microscopic Test,Stool R/M/E, 300.00 
+199,SEM,Routine Microscopic Test,Semen Analysis, 600.00 
+200,WID,Serology,Widal Test, 600.00 
+201,CRP,Serology,CRP (C-Reactive Protein), 600.00 
+202,MT,Serology,MT (Montux Test), 500.00 
+203,VDR,Serology,VDRL (Qlty + Qnty), 800.00 
+204,WID,Serology,Widal Test, 600.00 
+205,TPN,Serology,TPHA (Qlty), 600.00 
+206,TPL,Serology,TPHA (Qnty), 900.00 
+207,ASO,Serology,ASO (Qnty)," 1,000.00 "
+208,RAF,Serology,RA/RF Test," 1,000.00 "
+209,RWT,Serology,Rose-Waaler Test, 600.00 
+210,FBA,Serology,Febrile Antigen," 1,000.00 "
+211,TPA,Serology,Triple Antigen," 1,000.00 "
+212,CRP,Serology,CRP (C-Reactive Protein), 800.00 
+213,GRP,Serology,Blood Grouping (EDTA Tube-2 mL whole Blood), 100.00 
+214,ATP,Torch Panel,Anti Toxo Plasma IgG," 1,000.00 "
+215,ATM,Torch Panel,Anti Toxo Plasma IgM," 1,000.00 "
+216,ARG,Torch Panel,Anti Rubella IgG," 1,000.00 "
+217,ARM,Torch Panel,Anti Rubella IgM," 1,000.00 "
+218,ACG,Torch Panel,Anti CMV- IgG," 1,000.00 "
+219,ACM,Torch Panel,Anti CMV- IgM," 1,000.00 "
+220,AHG,Torch Panel,Anti HSV-1 IgG," 1,000.00 "
+221,AHM,Torch Panel,Anti HSV-1 IgM," 1,000.00 "
+222,AHSG,Torch Panel,Anti HSV-2 IgG," 1,000.00 "
+223,AHSM,Torch Panel,Anti HSV-2 IgM," 1,000.00 "
+224,TCG,Torch Panel,Torch IgG (5 Test)," 5,050.00 "
+225,TCM,Torch Panel,Torch IgM (5 Test)," 5,050.00 "
+226,TGM,Torch Panel,Torch IgM+IgG (10 Test)," 11,000.00 "
+227,AHIV,Torch Panel,Anti HIV (1 &2)," 1,000.00 "
+228,HCG,Tumour Markers,Beta-hCG, 200.00 
+229,PSA,Tumour Markers,PSA (Prostate Specific Antigen)," 1,000.00 "
+230,FPSA,Tumour Markers,Free PSA (Prostate Specific Antigen)," 1,500.00 "
+231,CEA,Tumour Markers,CEA (Carcino-Embryonic Antigen)," 1,000.00 "
+232,C125,Tumour Markers,CA-125," 1,000.00 "
+233,C15,Tumour Markers,CA- 15.3," 1,000.00 "
+234,C19,Tumour Markers,CA-19.9," 1,000.00 "
+235,AFP,Tumour Markers,AFP (Alpha-Feto Protein)," 1,000.00 "
+236,UWA,UltraSonogram,USG of Whole Abdomen (color)," 1,200.00 "
+237,UWP,UltraSonogram,USG of Whole Abdomen with PVR (color)," 1,400.00 "
+238,UPP,UltraSonogram,USG of Pregnancy Profile (color), 700.00 
+239,UFB,UltraSonogram,USG of Fetal Biophysical Profile (color),
+240,UHB,UltraSonogram,USG of HBS (hepato biliary system) with (color), 800.00 
+241,UKU,UltraSonogram,USG of KUB(color), 800.00 
+242,UKP,UltraSonogram,"USG of KUB,Prostate (color)", 800.00 
+243,UPO,UltraSonogram,USG of Pelvic Organs (color), 800.00 
+244,ULA,UltraSonogram,USG of Lower Abdomen (color), 800.00 
+245,UUA,UltraSonogram,USG of Uterus and Adnexa for Follicular Evaluation (color), 800.00 
+246,VTD,Vitamin,Vitamin D / Vitamin D3 / 25 (OH) Vitamin D (Serum)," 3,500.00 "
+247,SFA,Vitamin,S.Folic Acid (Fasting Serum)," 1,000.00 "
+248,SFT,Vitamin,S.Folate (Fasting Serum)," 1,000.00 "
+249,SVB,Vitamin,S.Vitamin B12 (Fasting Serum)," 2,100.00 "

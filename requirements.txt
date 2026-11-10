@@ -1,0 +1,95 @@
+# ==============================================================================
+# MedScope DCMS — Project Dependencies & Installation Specification
+# ==============================================================================
+# This file defines all dependencies required to install and run both the
+# Modern Full-Stack (FastAPI + React 19 + PostgreSQL) and the Streamlit Monolith.
+#
+# QUICK START GUIDE:
+# ------------------------------------------------------------------------------
+# 1. System Prerequisites:
+#    - Python: 3.10+ (Python 3.14 tested)
+#    - Node.js: 20+ and npm
+#    - PostgreSQL: 18 running on 127.0.0.1:5432 (database: medscope_dcms)
+#
+# 2. Install Backend Python Dependencies:
+#    python -m pip install -r requirements.txt
+#
+# 3. Install Frontend Node.js Dependencies:
+#    cd frontend
+#    npm install
+#
+# 4. Initialize Database Schema & Run Migrations:
+#    python -m alembic -c backend/alembic.ini upgrade head
+#    python backend/scripts/seed_components.py
+#
+# 5. Start the Services:
+#    - Backend API:  python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload
+#    - Frontend UI:  cd frontend && npm run dev (http://127.0.0.1:5173)
+#    - Legacy App:   python -m streamlit run "DCMS V1.py" --server.port 8501
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. BACKEND API FRAMEWORK & SERVER (Python)
+# ------------------------------------------------------------------------------
+fastapi>=0.110.0,<1.0.0          # High-performance async REST API framework
+uvicorn[standard]>=0.28.0,<1.0.0 # Production ASGI server with uvloop and websockets
+python-multipart>=0.0.9          # Form-data and multipart request parsing for FastAPI
+
+# ------------------------------------------------------------------------------
+# 2. DATA VALIDATION & CONFIGURATION (Python)
+# ------------------------------------------------------------------------------
+pydantic>=2.6.0,<3.0.0           # Data modeling, schema validation, serialization
+pydantic-settings>=2.2.0,<3.0.0  # Application settings management from environment
+python-dotenv>=1.0.1             # Automated .env file configuration loading
+
+# ------------------------------------------------------------------------------
+# 3. DATABASE ORM, MIGRATIONS & DRIVERS (Python)
+# ------------------------------------------------------------------------------
+sqlalchemy>=2.0.28,<3.0.0        # Database ORM, Core query engine, connection pooling
+alembic>=1.13.1,<2.0.0           # Database schema migrations engine
+psycopg[binary]>=3.1.18,<4.0.0   # High-performance PostgreSQL 18 database adapter
+
+# ------------------------------------------------------------------------------
+# 4. LEGACY APPLICATION & MONOLITH MODULES (Python)
+# ------------------------------------------------------------------------------
+streamlit>=1.35.0,<2.0.0         # Web UI framework for DCMS V1.py & accounting.py
+
+# ------------------------------------------------------------------------------
+# 5. TESTING & HTTP CLIENTS (Python)
+# ------------------------------------------------------------------------------
+pytest>=8.0.0                    # Automated test runner and test framework
+httpx>=0.27.0                    # Async/Sync HTTP client for TestClient and REST calls
+requests>=2.31.0                 # HTTP request library for integrations and utilities
+
+# ==============================================================================
+# FRONTEND DEPENDENCIES (Node.js / npm)
+# ==============================================================================
+# To install all frontend dependencies, navigate to the frontend directory:
+#   cd frontend && npm install
+#
+# Recorded below from frontend/package.json for full project audit:
+#
+# Runtime Dependencies:
+#   react@^19.3.1               # React 19 core UI library
+#   react-dom@^19.3.1           # React 19 DOM renderer
+#   react-router-dom@^7.18.5    # Client-side declarative routing
+#   lucide-react@^1.69.0        # Icon suite
+#
+# Development & Build Dependencies:
+#   vite@^8.3.6                 # Next-generation frontend tooling and bundler
+#   @vitejs/plugin-react@^6.1.2 # Fast Refresh React plugin for Vite
+#   tailwindcss@^4.3.4          # Utility-first CSS framework (v4 engine)
+#   @tailwindcss/vite@^4.3.4    # Vite integration plugin for Tailwind CSS v4
+#   typescript@~7.0.2           # TypeScript language server and typecheck compiler (tsc)
+#   oxlint@^1.90.0              # High-performance Rust-based linter
+#   @playwright/test@^1.65.0    # Browser automated E2E testing framework
+#   @types/react@^19.3.0        # Type definitions for React
+#   @types/react-dom@^19.3.0    # Type definitions for React DOM
+#   @types/node@^24.19.2        # Type definitions for Node.js runtime
+#
+# Frontend Scripts:
+#   npm run dev                 # Start Vite dev server on http://127.0.0.1:5173
+#   npm run build               # Strict typecheck (tsc -b) and production bundle
+#   npm run lint                # Run oxlint across all TypeScript/TSX files
+#   npm run test:e2e            # Execute Playwright browser E2E test suites
+# ==============================================================================

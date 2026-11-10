@@ -1,0 +1,11 @@
+| File | কাজ |
+|---|---|
+| `README.md` | Quick start ও document links |
+| `project-context.md` | বর্তমান অবস্থা, phase log, blockers ও next step |
+| `docs/SCOPE.md` | পুরো project scope ও business rules |
+| `docs/ARCHITECTURE.md` | Architecture ও decision log |
+| `docs/DESIGN.md` | UI conventions |
+| `docs/API.md` | API contracts |
+| `docs/WORKFLOWS.md` | Screens, workflows ও UI/API mapping |
+| `docs/DATABASE.md` | Schema, migrations ও seed |
+| `docs/TESTING.md` | Test scenarios ও actual results |

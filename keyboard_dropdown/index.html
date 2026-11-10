@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Source Sans Pro", sans-serif;
+      color: #26331a;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: transparent; font-size: 16px; }
+    .field { width: 100%; }
+    .label { display: block; margin: 0 0 6px; font-size: 15px; line-height: 1.4; font-weight: 400; }
+    .control {
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: #fff;
+      border: 2px solid #78a5a8;
+      border-radius: 8px;
+    }
+    .control:focus-within {
+      border-color: #008b8b;
+      box-shadow: 0 0 0 2px rgb(0 139 139 / 20%);
+    }
+    input {
+      width: 100%;
+      min-width: 20px;
+      padding: 4px 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: #26331a;
+      font: inherit;
+    }
+    input::placeholder { color: #607679; opacity: 1; }
+    .arrow { color: #008b8b; font-size: 15px; user-select: none; }
+    .list {
+      display: none;
+      max-height: 180px;
+      margin-top: 4px;
+      overflow-y: auto;
+      border: 1px solid #d5e4e6;
+      border-radius: 6px;
+      background: #fff;
+      box-shadow: 0 4px 12px rgb(0 91 96 / 12%);
+    }
+    .list.open { display: block; }
+    .option {
+      padding: 8px 10px;
+      cursor: pointer;
+      overflow-wrap: anywhere;
+      font-size: 16px;
+      line-height: 1.4;
+    }
+    .option.highlighted { background: #fce9e4; }
+    .option.selected { font-weight: 600; }
+    .empty { padding: 8px 10px; color: #607679; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <div class="field">
+    <label class="label" id="label"></label>
+    <div class="control">
+      <input id="input" type="text" role="combobox" aria-autocomplete="list"
+        aria-haspopup="listbox" aria-expanded="false" autocomplete="off">
+      <span class="arrow" aria-hidden="true">▾</span>
+    </div>
+    <div class="list" id="list" role="listbox"></div>
+  </div>
+  <script>
+    const labelNode = document.getElementById("label");
+    const input = document.getElementById("input");
+    const list = document.getElementById("list");
+    let options = [];
+    let selected = null;
+    let multi = false;
+    let query = "";
+    let highlighted = 0;
+    let open = false;
+
+    function send(type, payload = {}) {
+      window.parent.postMessage(
+        { isStreamlitMessage: true, type, ...payload },
+        "*"
+      );
+    }
+
+    function resize() {
+      send("streamlit:setFrameHeight", { height: open ? 246 : 76 });
+    }
+
+    function selectedValues() {
+      return multi ? (Array.isArray(selected) ? selected : []) : [selected];
+    }
+
+    function filteredOptions() {
+      const term = query.trim().toLocaleLowerCase();
+      return term
+        ? options.filter(option => option.toLocaleLowerCase().includes(term))
+        : options;
+    }
+
+    function commit(option) {
+      if (multi) {
+        const values = selectedValues();
+        selected = values.includes(option)
+          ? values.filter(value => value !== option)
+          : [...values, option];
+      } else {
+        selected = option;
+      }
+      query = "";
+      open = false;
+      render();
+      send("streamlit:setComponentValue", { value: selected, dataType: "json" });
+    }
+
+    function render() {
+      const candidates = filteredOptions();
+      labelNode.textContent = window.componentArgs?.label || "";
+      input.setAttribute("aria-label", window.componentArgs?.label || "");
+      input.setAttribute("aria-expanded", String(open));
+      input.placeholder = multi
+        ? "Search and add tests"
+        : (open || !selected ? "Type to search" : "");
+
+      if (multi) {
+        input.value = query;
+      } else {
+        input.value = query || (!open && selected ? selected : "");
+      }
+
+      list.replaceChildren();
+      list.classList.toggle("open", open);
+      if (open && candidates.length) {
+        candidates.forEach((option, index) => {
+          const item = document.createElement("div");
+          item.className = "option";
+          item.setAttribute("role", "option");
+          item.setAttribute("aria-selected", String(index === highlighted));
+          if (index === highlighted) item.classList.add("highlighted");
+          if (selectedValues().includes(option)) item.classList.add("selected");
+          item.textContent = option;
+          item.addEventListener("mousedown", event => event.preventDefault());
+          item.addEventListener("click", () => commit(option));
+          list.appendChild(item);
+        });
+      } else if (open) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No matching options";
+        list.appendChild(empty);
+      }
+      resize();
+    }
+
+    input.addEventListener("focus", () => {
+      open = true;
+      query = "";
+      highlighted = Math.max(0, options.indexOf(selected));
+      render();
+    });
+
+    input.addEventListener("input", () => {
+      query = input.value;
+      highlighted = 0;
+      open = true;
+      render();
+    });
+
+    input.addEventListener("keydown", event => {
+      const candidates = filteredOptions();
+      if (event.key === "ArrowDown" && open && candidates.length) {
+        event.preventDefault();
+        highlighted = (highlighted + 1) % candidates.length;
+        render();
+      } else if (event.key === "ArrowUp" && open && candidates.length) {
+        event.preventDefault();
+        highlighted = (highlighted - 1 + candidates.length) % candidates.length;
+        render();
+      } else if ((event.key === "Enter" || event.key === "Tab") && open && query.trim() && candidates.length) {
+        commit(candidates[highlighted]);
+        if (event.key === "Enter") event.preventDefault();
+      } else if (event.key === "Escape") {
+        open = false;
+        query = "";
+        render();
+      }
+    });
+
+    window.addEventListener("message", event => {
+      if (event.data?.type !== "streamlit:render") return;
+      window.componentArgs = event.data.args || {};
+      options = Array.isArray(window.componentArgs.options) ? window.componentArgs.options : [];
+      selected = window.componentArgs.selected;
+      multi = Boolean(window.componentArgs.multi);
+      highlighted = Math.min(highlighted, Math.max(0, filteredOptions().length - 1));
+      render();
+    });
+
+    send("streamlit:componentReady", { apiVersion: 1 });
+    resize();
+  </script>
+</body>
+</html>

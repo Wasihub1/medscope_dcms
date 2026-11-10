@@ -1,0 +1,6 @@
+building a Diagnostic Center Management System. Here is the project context and module wise workflow type details.
+have progressed so far with Python to build skeleton of the system with Streamlit and SQLite db.
+Now want to go for production grade development with React.js and Python+Fast API server for backend. Will start this with Antigravity (Gemini) and Claude Code. In current project repo, there is Sqlite.db. Parsing this db, Antigravity will migrate the whole schema to postgre in python code with SQLalchemy (ORM) class object. You will remain helper in the architectural plan.
+Will give you the audited report of full code base.
+Now write a audit prompt for Antigravity (Gemini) to produce a Audit report of full code base.
+First you will read and understand audit report then we will discuss how to progress further.

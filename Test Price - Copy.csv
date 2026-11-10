@@ -1,0 +1,250 @@
+Sl,Test Name
+1,S.Iron Profile
+2,S.Ferritin
+3,S.Electrolytes
+4,S.TIBC
+5,S.Amylase
+6,S.Lipase
+7,S.Aldolase
+8,S.Phosphate (PO4) /Inorganic Phosphate
+9,Urine Amylase (Spot Urine)
+10,Urethral Discharge for gram stain
+11,S.Magnesium
+12,RBS
+13,FBS
+14,BS (2hrs after Breakfast)
+15,HbA1c (EDTA Tube-2 mL whole Blood)
+16,OGTT
+17,Serum Uric Acid
+18,S.Creatinine
+19,Troponin-I
+20,S.CPK
+21,S.CK- MB
+22,S.LDH
+23,NT-proBNP (Serum / Plasma)
+24,CBC (EDTA Tube-2 mL whole Blood)
+25,TC (WBC)
+26,DC
+27,ESR
+28,Hemoglobin (Hb)
+29,Total Circulating Esonophil (TCE)
+30,BT & CT
+31,PBF (EDTA Tube -2 mL whole Blood)
+32,Fibrinogen (Blue top Sodium citrate Tube 2ml whole blood)
+33,D-Dimer (Plasma)
+34,Prothrombin time
+35,APTT
+36,HbA1c (EDTA Tube-2 mL whole Blood)
+37,Hb Electrophoresis
+38,Protein Electrophoresis 
+39,HBs Ag
+40,HBe Ag
+41,Anti-HBs
+42,Anti-HBe
+43,Anti-HCV
+44,Anti-HBc IgM
+45,Anti-HAV IgM
+46,"Anti-HEV IgM, IgG"
+47,HBV DNA (Quantitative)
+48,HCV RNA (Quantitative) 2ml whole Blood EDTA Tube
+49,Fluid for ADA
+50,"Bio-chemical test: Sugar, Protein"
+51,Microbiological Fluid C/S
+52,Pap’s Smear / Cervical Smear
+53,TSH (Thyroid Stimulating Hormone)
+54,FT3 (Free Triiodothyronine)
+55,FT4 (Free Thyroxine)
+56,T3 (Total Triiodothyronine)
+57,T4 (Total Thyroxine)
+58,T3 & TSH
+59,T4 & TSH
+60,T3 T4 TSH (Package)
+61,FSH (Follicle Stimulating Hormone)
+62,LH (Luteinizing Hormone)
+63,LH: FS Resiio
+64,Prolactin
+65,Testosterone
+66,Free Testosterone
+67,Progesterone
+68,Estradiol / Estrogen /E2
+69,Anti Mullerian Hormone (AMH) (Serum)
+70,Cortisol (AM)
+71,Cortisol (PM)
+72,Anti-Thyroid Ab (Anti-TPO & Anti -TG)
+73,Anti Thyroglobulin Ab (Anti-TG)
+74,Anti-Thyroperoxidase Ab (Anti TPO ab) /Anti microsomal Ab
+75,Growth Hormone
+76,Para thyroid hormone (PTH)
+77,Procalcitonin (Serum / Plasma)
+78,ACTH (Plasma) (EDTA Tube -2 mL whole Blood)
+79,Androgen
+80,Hydroxy Progesterone
+81,S.IgG
+82,S.IgM
+83,S.IgA
+84,S.IgE (Immunoglobulin E)
+85,C3 (Serum)
+86,C4 (Serum)
+87,ANA (Anti Nuclear Antibody)
+88,ANF (Anti Nuclear Factor)
+89,Anti-DS- DNA
+90,Anti-CCP (Anti Cyclic Citrullinated Peptide)
+91,Rh.Antibody Titre (Serum)
+92,Coomb's Test-Indirect (Serum)
+93,Coomb's Test-Direct (EDTA Tube -2 mL whole Blood)
+94,"Anti Dengue IgG, IgM"
+95,Dengue NS1 Antigen
+96,"Anti TB IgG, IgM"
+97,ICT for Malaria (EDTA Tube-2 mL Blood)
+98,ICT for Filaria (Serum)
+99,ICT for Kala Azar (Serum)
+100,ICT for Chikungunya IgG & IgM
+101,Anti H. Pylori IgG
+102,Anti H. Pylori IgM
+103,Chlamydia Ab IgG
+104,Chlamydia Ab IgM
+105,Salmonella typhi IgM
+106,Salmonella typhi IgG
+107,Febrile Antigen
+108,Triple Antigen
+109,ICT Leptospira
+110,B.Urea
+111,BUN
+112,S.Creatinine
+113,S.Uric Acid
+114,S.Calcium (Ca++)
+115,S.Electrolyte
+116,EGFR (Serum)
+117,Urine Ketone Bodies (Spot Urine)
+118,S.Fasting Lipid Profile
+119,S.Cholesterol
+120,S.HDL
+121,S.LDL (Direct Method)
+122,S.Triglyceride (TG)
+123,LFT /LIVER FUNCTION TEST
+124,S.Bilirubin
+125,S.SGPT (ALT)
+126,S.SGOT (AST)
+127,S.Alk. Phosphatase
+128,S.Total Protein
+129,S.AG Ratio
+130,S.Albumin
+131,S.Globulin
+132,Blood for C/S (with Container)
+133,Blood for C/S FAN Mathod (with Container)
+134,Urine for C/S (with Container)
+135,Sputum for C/S
+136,Pus for C/S
+137,Wound Swab for C/S
+138,Stool C/S
+139,Anorectal Swab For C/S
+140,Throat for Swab C/S
+141,Rectal Swab for C/S
+142,Fluid C/S
+143,"Anti Phospholipid Ab IgG, IgM"
+144,"Anti Cardiolipin Ab IgG, IgM"
+145,HLA-B 27 (EDTA Tube -2 mL whole Blood)
+146,Adenosine deaminase (ADA) (Serum / Fluid)
+147,ENA Profile
+148,Anti LKM-1 / Anti Smooth muscle ab
+149,S.Lithum
+150,S.Gamma GT
+151,PCR (Urine Protein to Creatinine Ratio) (Sample- Urine)
+152,24 hrs Urine Total Protein (UTP) (Sample- Spot Urine + 24 hrs Total Volume)
+153,Microalbumin (Sample- Spot Urine)
+154,ACR (Albumin Creatinine Ratio) (Sample-Spot Urine)
+155,Urine Albumin
+156,182 O31 24 Hrs Urine Creatinine (Sample- Spot urine)
+157,CCR (creatinine clearance rate)-Serum &Urine+ Total Volume
+158,Ascitic Fluid For Albumin
+159,Fasting Insuling (Serum)
+160,C-Peptide (Fasting Serum)
+161,Factor VIII (Blue top Sodium citrate Tube 2ml whole blood)
+162,Factor IX (Blue top Sodium citrate Tube 2ml whole blood)
+163,DHEAS (Serum)
+164,Ceruloplasmin (Serum)
+165,Ammonia (EDTA Tube -2 mL whole Blood)
+166,24 Hrs Urine Phosphate
+167,Anti RNP 70 (Serum)
+168,Sputum Malignant Cell
+169,Pleural Fluid for malignant cell
+170,24 Hrs Urine Calcium (Spot Urine)
+171,CBC (EDTA Tube-2 mL whole Blood)
+172,Hemoglobin (Hb)
+173,Beta-hCG
+174,hCG
+175,RBS
+176,FBS
+177,HbA1c
+178,S.Creatinine
+179,HBs Ag
+180,TSH (Thyroid Stimulating Hormone)
+181,FT3 (Free Triiodothyronine)
+182,FT4 (Free Thyroxine)
+183,Blood Grouping (EDTA Tube-2 mL whole Blood)
+184,USG of Pregnancy Profile (color)
+185,Urine R/M/E
+186,CBC (EDTA Tube-2 mL whole Blood)
+187,Hemoglobin (Hb)
+188,RBS
+189,FBS
+190,S.Creatinine
+191,Urine R/M/E
+192,TSH (Thyroid Stimulating Hormone)
+193,FT3 (Free Triiodothyronine)
+194,FT4 (Free Thyroxine)
+195,ECG
+196,ESR
+197,Urine R/M/E
+198,Stool R/M/E
+199,Semen Analysis
+200,Widal Test
+201,CRP (C-Reactive Protein)
+202,MT (Montux Test)
+203,VDRL (Qlty + Qnty)
+204,Widal Test
+205,TPHA (Qlty)
+206,TPHA (Qnty)
+207,ASO (Qnty)
+208,RA/RF Test
+209,Rose-Waaler Test
+210,Febrile Antigen
+211,Triple Antigen
+212,CRP (C-Reactive Protein)
+213,Blood Grouping (EDTA Tube-2 mL whole Blood)
+214,Anti Toxo Plasma IgG
+215,Anti Toxo Plasma IgM
+216,Anti Rubella IgG
+217,Anti Rubella IgM
+218,Anti CMV- IgG
+219,Anti CMV- IgM
+220,Anti HSV-1 IgG
+221,Anti HSV-1 IgM
+222,Anti HSV-2 IgG
+223,Anti HSV-2 IgM
+224,Torch IgG (5 Test)
+225,Torch IgM (5 Test)
+226,Torch IgM+IgG (10 Test)
+227,Anti HIV (1 &2)
+228,Beta-hCG
+229,PSA (Prostate Specific Antigen)
+230,Free PSA (Prostate Specific Antigen)
+231,CEA (Carcino-Embryonic Antigen)
+232,CA-125
+233,CA- 15.3
+234,CA-19.9
+235,AFP (Alpha-Feto Protein)
+236,USG of Whole Abdomen (color)
+237,USG of Whole Abdomen with PVR (color)
+238,USG of Pregnancy Profile (color)
+239,USG of Fetal Biophysical Profile (color)
+240,USG of HBS (hepato biliary system) with (color)
+241,USG of KUB(color)
+242,"USG of KUB,Prostate (color)"
+243,USG of Pelvic Organs (color)
+244,USG of Lower Abdomen (color)
+245,USG of Uterus and Adnexa for Follicular Evaluation (color)
+246,Vitamin D / Vitamin D3 / 25 (OH) Vitamin D (Serum)
+247,S.Folic Acid (Fasting Serum)
+248,S.Folate (Fasting Serum)
+249,S.Vitamin B12 (Fasting Serum)

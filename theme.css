@@ -1,0 +1,344 @@
+:root {
+    --medscope-olive-950: #303b20;
+    --medscope-olive-900: #3d4b28;
+    --medscope-olive-800: #536638;
+    --medscope-olive-700: #687d45;
+    --medscope-olive-100: #e9eddc;
+    --medscope-champagne-50: #fcfaf4;
+    --medscope-champagne-100: #f5f0e2;
+    --medscope-champagne-200: #e8dec2;
+    --medscope-ink: #30362a;
+    --medscope-muted: #737866;
+    --medscope-border: #dedccf;
+    --medscope-white: #fffefa;
+    --medscope-focus: #a68b4b;
+}
+
+html,
+body,
+.stApp,
+[data-testid="stAppViewContainer"] {
+    color: var(--medscope-ink);
+    background:
+        radial-gradient(ellipse at 92% 0%, rgb(166 139 75 / 8%), transparent 34rem),
+        var(--medscope-champagne-50);
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+header[data-testid="stHeader"] {
+    background: rgb(252 250 244 / 90%);
+    backdrop-filter: blur(12px);
+}
+
+.block-container {
+    max-width: 1540px;
+    padding: 2rem clamp(1rem, 3vw, 2.75rem) 3.5rem;
+}
+
+[data-testid="stMarkdownContainer"] h1,
+[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3 {
+    color: var(--medscope-olive-900);
+    letter-spacing: -.025em;
+}
+
+[data-testid="stMarkdownContainer"] h1 {
+    font-size: clamp(1.8rem, 2.6vw, 2.45rem);
+    font-weight: 740;
+    margin-bottom: .35rem;
+}
+
+[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3 {
+    font-weight: 680;
+}
+
+[data-testid="stCaptionContainer"] {
+    color: var(--medscope-muted);
+}
+
+[data-testid="stWidgetLabel"] {
+    color: var(--medscope-ink);
+    font-weight: 590;
+}
+
+[data-testid="stMetric"] {
+    min-height: 108px;
+    padding: 1.1rem 1.2rem;
+    border: 1px solid var(--medscope-border);
+    border-top: 3px solid var(--medscope-olive-700);
+    border-radius: 14px;
+    background: linear-gradient(145deg, var(--medscope-white), var(--medscope-champagne-50));
+    box-shadow: 0 5px 18px rgb(48 59 32 / 5%);
+    transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+[data-testid="stMetric"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px rgb(48 59 32 / 9%);
+}
+
+[data-testid="stMetricLabel"] {
+    color: var(--medscope-muted);
+    font-size: .82rem;
+    font-weight: 650;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+[data-testid="stMetricValue"] {
+    color: var(--medscope-olive-900);
+    font-weight: 740;
+    letter-spacing: -.03em;
+}
+
+div[data-testid="stForm"] {
+    padding: 1.25rem 1.35rem;
+    border: 1px solid var(--medscope-border);
+    border-radius: 15px;
+    background: rgb(255 254 250 / 78%);
+    box-shadow: 0 6px 22px rgb(48 59 32 / 5%);
+}
+
+[data-testid="stTextInputRootElement"],
+[data-testid="stNumberInputRootElement"],
+[data-testid="stTextAreaRootElement"],
+[data-testid="stDateInputRootElement"],
+[data-testid="stTimeInputRootElement"],
+[data-testid="stTextInput"] [data-baseweb="base-input"],
+[data-testid="stNumberInput"] [data-baseweb="input"],
+[data-testid="stTextArea"] [data-baseweb="textarea"],
+[data-testid="stDateInput"] [data-baseweb="input"],
+[data-testid="stTimeInput"] [data-baseweb="input"],
+[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-testid="stMultiSelect"] [data-baseweb="select"] > div {
+    border: 1.5px solid #b9b8a9 !important;
+    border-radius: 9px !important;
+    background-color: var(--medscope-white) !important;
+    box-shadow: 0 1px 2px rgb(48 54 42 / 4%);
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input,
+[data-testid="stTextArea"] textarea,
+[data-testid="stDateInput"] input,
+[data-testid="stTimeInput"] input,
+[data-testid="stSelectbox"] [role="combobox"],
+[data-testid="stMultiSelect"] [role="combobox"] {
+    color: var(--medscope-ink) !important;
+    font-size: 16px !important;
+}
+
+[data-testid="stTextInput"] input::placeholder,
+[data-testid="stTextArea"] textarea::placeholder {
+    color: #777b6e !important;
+    opacity: 1;
+}
+
+[data-testid="stTextInputRootElement"]:focus-within,
+[data-testid="stNumberInputRootElement"]:focus-within,
+[data-testid="stTextAreaRootElement"]:focus-within,
+[data-testid="stDateInputRootElement"]:focus-within,
+[data-testid="stTimeInputRootElement"]:focus-within,
+[data-testid="stSelectbox"] [data-baseweb="select"]:focus-within > div,
+[data-testid="stMultiSelect"] [data-baseweb="select"]:focus-within > div {
+    border-color: var(--medscope-focus) !important;
+    box-shadow: 0 0 0 3px rgb(166 139 75 / 19%) !important;
+}
+
+[data-testid="stTextInput"] input:disabled,
+[data-testid="stNumberInput"] input:disabled,
+[data-testid="stTextArea"] textarea:disabled {
+    color: #85877c !important;
+    background: #f0eee7 !important;
+}
+
+[data-testid="stDataFrame"],
+[data-testid="stTable"],
+[data-testid="stDataEditor"] {
+    overflow: hidden;
+    border: 1px solid var(--medscope-border);
+    border-radius: 12px;
+    background: var(--medscope-white);
+    box-shadow: 0 3px 14px rgb(48 59 32 / 4%);
+}
+
+[data-testid="stFileUploader"] section {
+    border: 1.5px dashed #aaa88f !important;
+    border-radius: 11px !important;
+    background: var(--medscope-white);
+}
+
+[data-testid="stButton"] button,
+[data-testid="stFormSubmitButton"] button,
+[data-testid="stDownloadButton"] button {
+    min-height: 42px;
+    border-radius: 9px !important;
+    font-weight: 650 !important;
+    transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+button[kind="primary"],
+button[data-testid="baseButton-primary"],
+[data-testid="stFormSubmitButton"] button {
+    color: var(--medscope-white) !important;
+    background: var(--medscope-olive-800) !important;
+    border: 1px solid var(--medscope-olive-900) !important;
+}
+
+button[kind="primary"]:hover,
+button[data-testid="baseButton-primary"]:hover,
+[data-testid="stFormSubmitButton"] button:hover {
+    color: #fff !important;
+    background: var(--medscope-olive-900) !important;
+    border-color: var(--medscope-olive-950) !important;
+}
+
+button[kind="secondary"],
+button[data-testid="baseButton-secondary"],
+[data-testid="stDownloadButton"] button {
+    color: var(--medscope-olive-900) !important;
+    background: var(--medscope-white) !important;
+    border: 1px solid #c8c0a8 !important;
+}
+
+button[kind="secondary"]:hover,
+button[data-testid="baseButton-secondary"]:hover,
+[data-testid="stDownloadButton"] button:hover {
+    background: var(--medscope-champagne-100) !important;
+    border-color: var(--medscope-focus) !important;
+}
+
+[data-testid="stButton"] button:hover,
+[data-testid="stFormSubmitButton"] button:hover,
+[data-testid="stDownloadButton"] button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 12px rgb(48 59 32 / 14%);
+}
+
+[data-testid="stTabs"] [role="tablist"] {
+    gap: .4rem;
+    border-bottom: 1px solid var(--medscope-border);
+}
+
+[data-testid="stTabs"] button[role="tab"] {
+    min-height: 42px;
+    padding: .55rem 1rem;
+    border-radius: 9px 9px 0 0;
+    color: var(--medscope-muted);
+    font-weight: 620;
+}
+
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+    color: var(--medscope-olive-900);
+    background: var(--medscope-olive-100);
+}
+
+[data-testid="stExpander"] {
+    border: 1px solid var(--medscope-border);
+    border-radius: 11px;
+    background: rgb(255 254 250 / 65%);
+}
+
+.stAlert {
+    border-radius: 10px;
+    box-shadow: 0 3px 12px rgb(48 59 32 / 4%);
+}
+
+section[data-testid="stSidebar"] {
+    color: #fdfcf7;
+    background: linear-gradient(180deg, var(--medscope-olive-900), var(--medscope-olive-950));
+    border-right: 1px solid rgb(255 255 255 / 12%);
+}
+
+section[data-testid="stSidebar"] * {
+    color: #fdfcf7;
+}
+
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2 {
+    padding-bottom: .9rem;
+    border-bottom: 1px solid rgb(255 255 255 / 18%);
+    color: #fffefa;
+    letter-spacing: -.035em;
+}
+
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+    color: rgb(253 252 247 / 74%);
+}
+
+section[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] {
+    gap: .25rem;
+}
+
+section[data-testid="stSidebar"] [data-testid="stRadio"] label {
+    padding: .35rem .55rem;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    transition: background 140ms ease, border-color 140ms ease;
+}
+
+section[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
+    background: rgb(255 255 255 / 9%);
+}
+
+section[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) {
+    background: rgb(255 255 255 / 14%);
+    border-color: rgb(255 255 255 / 24%);
+}
+
+section[data-testid="stSidebar"] [data-testid="stButton"] button {
+    color: #fffefa !important;
+    background: var(--medscope-olive-700) !important;
+    border: 1px solid rgb(255 255 255 / 16%) !important;
+}
+
+section[data-testid="stSidebar"] .st-key-sign_out button {
+    background: #a34f3e !important;
+    border-color: #a34f3e !important;
+}
+
+.st-key-login_screen [data-testid="stMarkdownContainer"] h1 {
+    font-size: clamp(2.6rem, 4vw, 3.6rem);
+    letter-spacing: -.055em;
+}
+
+.st-key-login_screen div[data-testid="stForm"] {
+    padding: 1.4rem 1.5rem;
+    border-color: var(--medscope-border);
+    box-shadow: 0 18px 50px rgb(48 59 32 / 10%);
+}
+
+@media (max-width: 900px) {
+    .block-container {
+        padding: 1.25rem 1rem 2.5rem;
+    }
+
+    [data-testid="stMetric"] {
+        min-height: 94px;
+        padding: .9rem 1rem;
+    }
+}
+
+@media (max-width: 600px) {
+    .block-container {
+        padding: 1rem .75rem 2rem;
+    }
+
+    div[data-testid="stForm"] {
+        padding: 1rem;
+    }
+
+    [data-testid="stMarkdownContainer"] h1 {
+        font-size: 1.7rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+    }
+}

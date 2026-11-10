@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-orange: #CF8852;
+  --color-brand-platinum: #E8E7E3;
+  --color-brand-moss: #525333;
+
+  --color-orange-50:  #FAF3EC;
+  --color-orange-100: #F3E4D6;
+  --color-orange-200: #E6C4A7;
+  --color-orange-300: #DCA77C;
+  --color-orange-400: #D69766;
+  --color-orange-500: #CF8852;
+  --color-orange-600: #B7703B;
+  --color-orange-700: #96572A;
+  --color-orange-800: #75401D;
+  --color-orange-900: #582E12;
+
+  --color-platinum-25:  #FAF9F6;
+  --color-platinum-50:  #F4F3F0;
+  --color-platinum-100: #E8E7E3;
+  --color-platinum-200: #DCDAD4;
+  --color-platinum-300: #CAC7BE;
+  --color-platinum-400: #B1ADA2;
+  --color-platinum-500: #8E8A7E;
+  --color-platinum-600: #6D6A60;
+  --color-platinum-700: #54524A;
+
+  --color-moss-50:  #F2F3EC;
+  --color-moss-100: #E2E4D4;
+  --color-moss-200: #C2C6A4;
+  --color-moss-300: #9FA574;
+  --color-moss-400: #7A7E4F;
+  --color-moss-500: #525333;
+  --color-moss-600: #444529;
+  --color-moss-700: #373720;
+  --color-moss-800: #292917;
+  --color-moss-900: #1B1B0E;
+
+  --color-success-bg:     #EDF7EE;
+  --color-success-border: #C3E6C7;
+  --color-success-text:   #1E6327;
+  --color-success-solid:  #2D8A39;
+
+  --color-warning-bg:     #FEF7EC;
+  --color-warning-border: #FBE0B2;
+  --color-warning-text:   #8A5608;
+  --color-warning-solid:  #D9820B;
+
+  --color-danger-bg:     #FDF2F0;
+  --color-danger-border: #F8CBC6;
+  --color-danger-text:   #9C2417;
+  --color-danger-solid:  #D03828;
+
+  --color-info-bg:     #EDF5F7;
+  --color-info-border: #C4E2E7;
+  --color-info-text:   #185B68;
+  --color-info-solid:  #248496;
+}
+
+:root {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hind Siliguri', 'Kalpurush', sans-serif;
+  color: #1B1B0E;
+  background-color: #E8E7E3;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #E8E7E3;
+  color: #1B1B0E;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #E8E7E3;
+}
+::-webkit-scrollbar-thumb {
+  background: #CAC7BE;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #B1ADA2;
+}
+
+/* Print styles */
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 8mm;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  body, html {
+    background: #FFFFFF !important;
+    color: #000000 !important;
+  }
+}
