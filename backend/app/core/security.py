@@ -1,6 +1,10 @@
 from typing import Optional
-from fastapi import Header, HTTPException, Depends, status
+from fastapi import Request, HTTPException, Depends, status
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from backend.app.core.config import settings
+from backend.app.core.database import get_db
 
 
 class CurrentActor(BaseModel):
@@ -8,119 +12,67 @@ class CurrentActor(BaseModel):
     tenant_id: str
     username: str
     display_name: str
-    role: str  # RECEPTIONIST, ADMIN, OWNER, etc.
+    role: str  # Acting role in the current session
     email: Optional[str] = None
     phone: Optional[str] = None
 
 
-# Default development actors
-DEFAULT_RECEPTIONIST = CurrentActor(
-    id=1,
-    tenant_id="center-seba-01",
-    username="reception_fatima",
-    display_name="Fatima Akter",
-    role="RECEPTIONIST",
-    email="fatima@sebadiagnostic.com",
-    phone="01711000111",
-)
+def extract_session_token(request: Request) -> Optional[str]:
+    """Extracts raw session token from Authorization header, X-Session-Token, or cookie."""
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        return auth_header[7:].strip()
 
-DEFAULT_ADMIN = CurrentActor(
-    id=2,
-    tenant_id="center-seba-01",
-    username="admin_tariq",
-    display_name="Tariqul Islam (Admin)",
-    role="ADMIN",
-    email="tariq@sebadiagnostic.com",
-    phone="01711000222",
-)
+    session_header = request.headers.get("X-Session-Token")
+    if session_header:
+        return session_header.strip()
 
-DEFAULT_TECH_KAMAL = CurrentActor(
-    id=3,
-    tenant_id="center-seba-01",
-    username="tech_kamal",
-    display_name="Kamal Hossain (Hematology)",
-    role="LAB_TECH",
-    email="kamal@sebadiagnostic.com",
-    phone="01711000333",
-)
+    cookie_token = request.cookies.get(settings.SESSION_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token.strip()
 
-DEFAULT_TECH_NASRIN = CurrentActor(
-    id=4,
-    tenant_id="center-seba-01",
-    username="tech_nasrin",
-    display_name="Nasrin Sultana (Biochemistry)",
-    role="LAB_TECH",
-    email="nasrin@sebadiagnostic.com",
-    phone="01711000444",
-)
+    return None
 
 
 def get_current_actor(
-    x_actor_role: Optional[str] = Header(default=None, alias="X-Actor-Role"),
-    x_staff_role: Optional[str] = Header(default=None, alias="X-Staff-Role"),
-    x_actor_id: Optional[str] = Header(default=None, alias="X-Actor-Id"),
-    x_staff_id: Optional[str] = Header(default=None, alias="X-Staff-Id"),
-    x_tenant_id: Optional[str] = Header(default="center-seba-01", alias="X-Tenant-Id"),
+    request: Request,
+    db: Session = Depends(get_db),
 ) -> CurrentActor:
-    """Dependency returning the current development actor based on request headers."""
-    raw_role = x_actor_role or x_staff_role or "RECEPTIONIST"
-    role_normalized = raw_role.strip().upper()
-    tenant = (x_tenant_id or "center-seba-01").strip()
-    if not tenant or tenant == "11111111-1111-1111-1111-111111111111":
-        tenant = "center-seba-01"
-
-    raw_id = x_actor_id or x_staff_id or "1"
-    # Safely resolve numeric staff ID
-    staff_id = None
-    if raw_id:
-        try:
-            staff_id = int(str(raw_id).strip())
-        except (ValueError, TypeError):
-            staff_id = None
-    if x_actor_id:
-        try:
-            staff_id = int(str(x_actor_id).strip())
-        except (ValueError, TypeError):
-            staff_id = None
-
-    if role_normalized in ("ADMIN", "OWNER"):
-        return CurrentActor(
-            id=staff_id if staff_id is not None else 2,
-            tenant_id=tenant,
-            username="admin_tariq",
-            display_name="Tariqul Islam (Admin)",
-            role="ADMIN",
-            email="tariq@sebadiagnostic.com",
-            phone="01711000222",
+    """
+    Dependency resolving the authenticated actor from server-side session.
+    Rejects missing or invalid sessions with HTTP 401 Unauthorized.
+    Enforces CSRF header on state-changing requests when cookie authentication is used.
+    """
+    token = extract_session_token(request)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated. Please log in.",
         )
-    elif role_normalized == "LAB_TECH":
-        if staff_id == 4:
-            return CurrentActor(
-                id=4,
-                tenant_id=tenant,
-                username="tech_nasrin",
-                display_name="Nasrin Sultana (Biochemistry)",
-                role="LAB_TECH",
-                email="nasrin@sebadiagnostic.com",
-                phone="01711000444",
-            )
-        return CurrentActor(
-            id=3 if staff_id is None else staff_id,
-            tenant_id=tenant,
-            username="tech_kamal",
-            display_name="Kamal Hossain (Hematology)",
-            role="LAB_TECH",
-            email="kamal@sebadiagnostic.com",
-            phone="01711000333",
-        )
+
+    # CSRF defense: If session was supplied via cookie and method is state-changing, require custom header
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        is_cookie_auth = bool(request.cookies.get(settings.SESSION_COOKIE_NAME))
+        if is_cookie_auth:
+            csrf_header = request.headers.get("X-Requested-With")
+            auth_header = request.headers.get("Authorization")
+            if not csrf_header and not auth_header:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="CSRF protection error: missing X-Requested-With header",
+                )
+
+    from backend.app.services.auth_service import resolve_session
+    session, staff = resolve_session(db, token)
+
     return CurrentActor(
-        id=staff_id if staff_id is not None else 1,
-        tenant_id=tenant,
-        username="reception_fatima",
-        display_name="Fatima Akter",
-        role="RECEPTIONIST",
-        email="fatima@sebadiagnostic.com",
-        phone="01711000111",
+        id=staff.id,
+        tenant_id=staff.tenant_id,
+        username=staff.username,
+        display_name=staff.display_name,
+        role=session.acting_role,
+        email=staff.email,
+        phone=staff.phone,
     )
 
 
@@ -128,10 +80,10 @@ def require_receptionist(
     actor: CurrentActor = Depends(get_current_actor),
 ) -> CurrentActor:
     """Ensures actor is permitted to perform Receptionist operations."""
-    if actor.role not in ("RECEPTIONIST", "ADMIN", "OWNER"):
+    if actor.role not in ("RECEPTIONIST", "CASHIER", "ADMIN", "OWNER"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Operation restricted to Receptionist, Admin, or Owner roles.",
+            detail="Operation restricted to Receptionist, Cashier, Admin, or Owner roles.",
         )
     return actor
 

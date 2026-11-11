@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MedScope DCMS landing page</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Noto+Sans+Bengali:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#525333}a:hover{color:#26270F}
+@keyframes ecg{0%{stroke-dashoffset:720}55%{stroke-dashoffset:0}100%{stroke-dashoffset:-720}}
+@keyframes fillup{0%{transform:scaleY(0.15)}60%{transform:scaleY(1)}100%{transform:scaleY(1)}}
+@keyframes travel{0%{transform:translateX(0)}100%{transform:translateX(300px)}}
+@keyframes chipin{0%{opacity:0;transform:translateY(16px)}12%{opacity:1;transform:translateY(0)}80%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-8px)}}
+.ecg{stroke-dasharray:720;stroke-dashoffset:720;animation:ecg 3.6s cubic-bezier(0.22,1,0.36,1) infinite}
+.tube-fill{transform-box:fill-box;transform-origin:bottom;animation:fillup 4s cubic-bezier(0.22,1,0.36,1) infinite alternate}
+.dot{animation:travel 4.8s cubic-bezier(0.22,1,0.36,1) infinite alternate}
+.chip{opacity:0;animation:chipin 8s cubic-bezier(0.22,1,0.36,1) infinite}
+@keyframes marquee{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+.track{animation:marquee 32s linear infinite}
+.marq:hover .track{animation-play-state:paused}
+@media (prefers-reduced-motion: reduce){.ecg,.tube-fill,.dot,.chip,.track{animation:none;opacity:1;stroke-dashoffset:0;transform:none}.track{width:auto!important;flex-wrap:wrap}}
+</style>
+</helmet>
+<div style="font-family: 'Manrope','Noto Sans Bengali',system-ui,sans-serif; background: #E8E7E3; color: #26270F">
+
+<!-- NAV -->
+<header>
+<div style="max-width: 1200px; margin: 0 auto; padding: 24px 32px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px">
+<div style="display: flex; align-items: center; gap: 12px">
+<svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#525333"></rect><path d="M16 8v16M8 16h16" stroke="{{accent}}" stroke-width="3" stroke-linecap="round" fill="none"></path></svg>
+<span style="font-size: 20px; font-weight: 700; line-height: 28px; color: #26270F">MedScope DCMS</span>
+</div>
+<a href="Login.dc.html" style="display: inline-block; background: #525333; color: #FFFFFF; font-size: 14px; font-weight: 700; line-height: 20px; padding: 12px 24px; border-radius: 12px; text-decoration: none">Sign in</a>
+</div>
+</header>
+
+<!-- HERO -->
+<section style="max-width: 1200px; margin: 0 auto; padding: 64px 32px 96px; display: flex; flex-wrap: wrap; align-items: center; gap: 64px">
+<div style="flex: 1 1 440px; min-width: 0">
+<h1 style="margin: 0; max-width: 680px; font-size: 60px; line-height: 1; font-weight: 700; color: #26270F; text-wrap: balance">Your diagnostic center, in one place</h1>
+<p style="margin: 24px 0 0; max-width: 480px; font-size: 18px; line-height: 28px; color: #3D3E1F; text-wrap: pretty">Billing, samples, results and reports.</p>
+<div style="margin-top: 40px">
+<a href="Login.dc.html" style="display: inline-block; background: {{accent}}; color: #26270F; font-size: 18px; font-weight: 700; line-height: 28px; padding: 16px 32px; border-radius: 12px; text-decoration: none">Sign in</a>
+</div>
+</div>
+
+<!-- animated scene -->
+<div style="flex: 1 1 440px; min-width: 0">
+<div style="background: #525333; border-radius: 24px; padding: 40px; position: relative; overflow: hidden; min-height: 400px; box-sizing: border-box">
+<svg viewBox="0 0 400 130" width="100%" style="display: block" role="img" aria-label="Animated heartbeat line">
+<path d="M0 70 H70 L86 70 L100 24 L118 112 L134 46 L148 70 H230 L246 70 L260 38 L276 96 L290 70 H400" fill="none" stroke="{{accent}}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="ecg"></path>
+</svg>
+
+<div style="margin-top: 32px; display: flex; align-items: flex-end; gap: 32px">
+<svg viewBox="0 0 60 120" width="60" height="120" role="img" aria-label="Sample tube filling">
+<rect x="14" y="6" width="32" height="104" rx="16" fill="none" stroke="#E8E7E3" stroke-width="3"></rect>
+<rect x="19" y="40" width="22" height="66" rx="11" fill="{{accent}}" class="tube-fill"></rect>
+<rect x="10" y="2" width="40" height="8" rx="4" fill="#E8E7E3"></rect>
+</svg>
+<div style="flex: 1 1 auto; min-width: 0; padding-bottom: 48px">
+<div style="position: relative; height: 24px">
+<div style="position: absolute; left: 0; right: 0; top: 11px; height: 2px; background: #E8E7E3; opacity: 0.4"></div>
+<div style="position: absolute; left: 0; top: 4px; width: 16px; height: 16px; border-radius: 8px; background: {{accent}}" class="dot"></div>
+</div>
+</div>
+</div>
+
+<div style="position: relative; height: 48px; margin-top: 24px">
+<div class="chip" style="position: absolute; left: 0; top: 0; background: #E8E7E3; color: #26270F; font-size: 14px; font-weight: 600; line-height: 20px; padding: 12px 16px; border-radius: 12px; animation-delay: 0s">Sample taken</div>
+<div class="chip" style="position: absolute; left: 0; top: 0; background: #E8E7E3; color: #26270F; font-size: 14px; font-weight: 600; line-height: 20px; padding: 12px 16px; border-radius: 12px; animation-delay: 2s">Result entered</div>
+<div class="chip" style="position: absolute; left: 0; top: 0; background: {{accent}}; color: #26270F; font-size: 14px; font-weight: 700; line-height: 20px; padding: 12px 16px; border-radius: 12px; animation-delay: 4s">Report ready</div>
+</div>
+</div>
+</div>
+</section>
+
+<!-- ENDLESS STRIP: icon and label items, more options to be added later -->
+<section style="background: #FFFFFF" aria-label="Workflow steps">
+<div class="marq" style="overflow: hidden; padding: 48px 0">
+<div class="track" style="display: flex; width: max-content">
+<div style="display: flex; flex: none"><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20c0-3.6 3-6 7-6s7 2.4 7 6"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Register</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6M10 3v13a2 2 0 0 0 4 0V3"></path><path d="M10 11h4"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Sample</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="12" height="17" rx="2"></rect><path d="M9 4h6v3H9z"></path><path d="M9.5 14l2 2 3.5-4"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Result</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7z"></path><path d="M14 3v4h4M10 12h5M10 16h5"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Report</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20c0-3.6 3-6 7-6s7 2.4 7 6"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Register</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6M10 3v13a2 2 0 0 0 4 0V3"></path><path d="M10 11h4"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Sample</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="12" height="17" rx="2"></rect><path d="M9 4h6v3H9z"></path><path d="M9.5 14l2 2 3.5-4"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Result</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7z"></path><path d="M14 3v4h4M10 12h5M10 16h5"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Report</span></div></div>
+<div style="display: flex; flex: none" aria-hidden="true"><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20c0-3.6 3-6 7-6s7 2.4 7 6"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Register</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6M10 3v13a2 2 0 0 0 4 0V3"></path><path d="M10 11h4"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Sample</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="12" height="17" rx="2"></rect><path d="M9 4h6v3H9z"></path><path d="M9.5 14l2 2 3.5-4"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Result</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7z"></path><path d="M14 3v4h4M10 12h5M10 16h5"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Report</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20c0-3.6 3-6 7-6s7 2.4 7 6"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Register</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6M10 3v13a2 2 0 0 0 4 0V3"></path><path d="M10 11h4"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Sample</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="12" height="17" rx="2"></rect><path d="M9 4h6v3H9z"></path><path d="M9.5 14l2 2 3.5-4"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Result</span></div><div style="flex: none; display: flex; align-items: center; gap: 16px; padding: 0 48px"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#525333" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l4 4v14H7z"></path><path d="M14 3v4h4M10 12h5M10 16h5"></path></svg><span style="font-size: 20px; line-height: 28px; font-weight: 600; white-space: nowrap">Report</span></div></div>
+</div>
+</div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+<div style="max-width: 1200px; margin: 0 auto; padding: 32px; font-size: 14px; line-height: 20px; color: #3D3E1F">MedScope DCMS</div>
+</footer>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#CF8852","options":["#CF8852","#B8733F","#E0A06E"]},"$preview":{"width":1360,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return { accent: this.props.accent ?? '#CF8852' };
+}
+}
+</script>
+</body>
+</html>

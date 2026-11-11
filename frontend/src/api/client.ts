@@ -17,72 +17,40 @@ import {
   WorklistSummary,
   BarcodeLabelData,
   TestOrderEvent,
+  AuthUser,
+  AuthMessageResponse,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
-// Active session state for headers aligned with seeded tenant and staff
-let currentActor = {
-  tenantId: 'center-seba-01',
-  role: 'RECEPTIONIST' as Role,
-  staffId: 1,
-  name: 'Fatima Akter',
+// Global 401 callback listener
+let onUnauthorizedCallback: (() => void) | null = null;
+export const setUnauthorizedCallback = (callback: (() => void) | null) => {
+  onUnauthorizedCallback = callback;
 };
-
-export const setApiActor = (role: Role, staffId?: number) => {
-  if (role === 'ADMIN') {
-    currentActor = {
-      tenantId: 'center-seba-01',
-      role: 'ADMIN',
-      staffId: 2,
-      name: 'Tariqul Islam',
-    };
-  } else if (role === 'LAB_TECH') {
-    if (staffId === 4) {
-      currentActor = {
-        tenantId: 'center-seba-01',
-        role: 'LAB_TECH',
-        staffId: 4,
-        name: 'Nasrin Sultana (Biochemistry)',
-      };
-    } else {
-      currentActor = {
-        tenantId: 'center-seba-01',
-        role: 'LAB_TECH',
-        staffId: 3,
-        name: 'Kamal Hossain (Hematology)',
-      };
-    }
-  } else {
-    currentActor = {
-      tenantId: 'center-seba-01',
-      role: 'RECEPTIONIST',
-      staffId: 1,
-      name: 'Fatima Akter',
-    };
-  }
-};
-
-export const getApiActor = () => currentActor;
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const url = `${API_BASE_URL}${cleanPath}`;
   const headers = new Headers(options.headers || {});
   headers.set('Content-Type', 'application/json');
-  headers.set('X-Tenant-Id', currentActor.tenantId);
-  headers.set('X-Actor-Id', String(currentActor.staffId));
-  headers.set('X-Actor-Role', currentActor.role);
-  headers.set('X-Actor-Name', encodeURIComponent(currentActor.name || 'Fatima Akter'));
+  headers.set('X-Requested-With', 'XMLHttpRequest');
 
   let response: Response;
   try {
     response = await fetch(url, {
       ...options,
+      credentials: 'include',
       headers,
     });
   } catch (netErr: any) {
     throw new Error(`Network connection error: ${netErr.message || 'Failed to fetch API.'}`);
+  }
+
+  if (response.status === 401 && !path.includes('/auth/login')) {
+    if (onUnauthorizedCallback) {
+      onUnauthorizedCallback();
+    }
   }
 
   if (!response.ok) {
@@ -104,6 +72,43 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  // Authentication (Prompt 09)
+  login: (username: string, password: string, role?: string) =>
+    request<AuthUser>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password, role }),
+    }),
+
+  logout: () =>
+    request<AuthMessageResponse>('/auth/logout', {
+      method: 'POST',
+    }),
+
+  getMe: () =>
+    request<AuthUser>('/auth/me'),
+
+  switchActingRole: (role: string) =>
+    request<AuthUser>('/auth/acting-role', {
+      method: 'POST',
+      body: JSON.stringify({ role }),
+    }),
+
+  changePassword: (old_password: string, new_password: string) =>
+    request<AuthMessageResponse>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ old_password, new_password }),
+    }),
+
+  adminResetPassword: (userId: number, new_password: string) =>
+    request<AuthMessageResponse>(`/auth/users/${userId}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ new_password }),
+    }),
+
+  adminUnlockUser: (userId: number) =>
+    request<AuthMessageResponse>(`/auth/users/${userId}/unlock`, {
+      method: 'POST',
+    }),
   // Dashboard
   getDashboard: () => request<DashboardMetrics>('/dashboard'),
 

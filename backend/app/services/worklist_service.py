@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import HTTPException, status
@@ -642,9 +643,9 @@ def record_culture_stage(
     now_ts = utc_now()
     order.culture_stage = target_stage
 
-    if target_stage == "FINAL":
-        order.status = "COMPLETED"
-    else:
+    # Fix 3 (D19, M12): Culture stage progression does NOT auto-complete the TestOrder.
+    # Culture stage and TestOrder status are independent lifecycles.
+    if order.status not in ("COMPLETED", "CANCELLED", "REJECTED", "SPOILED"):
         order.status = "IN_PROGRESS"
 
     lifecycle_event = TestOrderEvent(
@@ -742,6 +743,16 @@ def record_outsourced_stage(
     return build_worklist_item(order)
 
 
+def _sanitize_tech_event_text(text: Optional[str]) -> Optional[str]:
+    """Sanitizes monetary figures from historical lifecycle descriptions for Lab Techs (Fix 5)."""
+    if not text:
+        return text
+    cleaned = re.sub(r'(?:Tk\.?|৳)\s*\d+(?:\.\d+)?', '[REDACTED]', text)
+    cleaned = re.sub(r'for\s+\[REDACTED\]\s*', '', cleaned)
+    cleaned = re.sub(r':\s*\[REDACTED\]', '', cleaned)
+    return cleaned.strip()
+
+
 def get_order_events(
     db: Session,
     tenant_id: str,
@@ -763,14 +774,15 @@ def get_order_events(
     )
     events = list(db.execute(stmt).scalars().all())
 
+    is_tech = (actor.role == "LAB_TECH")
     return [
         TestOrderEventResponse(
             id=ev.id,
             test_order_id=ev.test_order_id,
             event_type=ev.event_type,
             stage=ev.stage,
-            description=ev.description,
-            notes=ev.notes,
+            description=_sanitize_tech_event_text(ev.description) if is_tech else ev.description,
+            notes=_sanitize_tech_event_text(ev.notes) if is_tech else ev.notes,
             actor_id=ev.actor_id,
             actor_name=ev.actor_name,
             actor_role=ev.actor_role,
@@ -890,6 +902,14 @@ def update_order_status(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot complete a {order.status} test order. Follows Not Performed exception workflow.",
+            )
+
+        # 4. Culture stage completion guard (Fix 3: D19, M12)
+        is_culture = (test and test.report_template == "CULTURE_SENSITIVITY") or (order.culture_stage is not None)
+        if is_culture and order.culture_stage != "FINAL":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Culture test cannot be completed while in '{order.culture_stage or 'INCUBATING'}' stage. Culture stage must reach FINAL before completion.",
             )
 
     prev_status = order.status

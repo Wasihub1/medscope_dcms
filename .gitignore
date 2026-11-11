@@ -70,6 +70,9 @@ medscope_data/
 *.sqlite3
 
 # Local backups and archives
+backups/
+*.dump
+*.sql
 *.zip
 *.tar
 *.tar.gz

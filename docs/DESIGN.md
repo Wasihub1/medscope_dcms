@@ -37,10 +37,13 @@ The design system is strictly anchored around three primary brand pillars: **Pla
 ### Derived CSS Token System
 ```css
 :root {
-  /* Core Pillars */
+  /* Core Pillars & Prompt 10 Tokens */
+  --color-accent: #CF8852;
   --color-brand-orange: #CF8852;
   --color-brand-platinum: #E8E7E3;
   --color-brand-moss: #525333;
+  --color-brand-ink: #26270F;
+  --color-brand-secondary: #3D3E1F;
 
   /* Persian Orange Scale */
   --color-orange-50:  #FAF3EC;
@@ -88,14 +91,18 @@ The design system is strictly anchored around three primary brand pillars: **Pla
 
 ## 3. Typography & Dual-Script Standards
 
-- **Primary Font Family:** Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif.
-- **Bangla Font Fallback:** 'Noto Sans Bengali', 'SolaimanLipi', 'Kalpurush', sans-serif.
+- **Primary Font Family:** Manrope (self-hosted via `@fontsource/manrope`), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif.
+- **Bangla Font Fallback:** 'Noto Sans Bengali' (self-hosted via `@fontsource/noto-sans-bengali`), 'SolaimanLipi', 'Kalpurush', sans-serif.
 - **Monospace Numbers & IDs:** 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, monospace.
+- **Self-Hosting Policy:** Fonts are bundled locally without runtime Google Fonts or external CDN requests, guaranteeing uninterrupted rendering on low-bandwidth clinical connections.
+- **Weight Cap:** Allowed weights: 400 (regular), 500 (medium), 600 (semibold), 700 (bold). Zero italics, zero ultra-bold/black weights.
+- **Contrast Requirement:** Button text on Persian Orange `#CF8852` uses ink `#26270F` (contrast ratio ~7:1, exceeding WCAG AAA). Flat backgrounds only; no background gradients.
 - **Hierarchy Scale:**
-  - Page Titles: `text-xl font-bold text-[#1B1B0E]` (20px)
-  - Section Headings: `text-sm font-bold text-[#525333]` (14px)
-  - Standard Labels / Inputs: `text-xs font-semibold text-[#54524A]` (12px)
-  - Metadata / Microcopy: `text-[11px] text-[#6D6A60]` (11px)
+  - Page Titles / Hero: `text-6xl font-bold text-[#26270F]` (60px, leading 1)
+  - Card Titles: `text-3xl font-semibold text-[#26270F]` (30px)
+  - Section Headings: `text-xl font-bold text-[#26270F]` (20px)
+  - Standard Labels / Inputs: `text-sm font-semibold text-[#26270F]` (14px)
+  - Secondary Copy / Microcopy: `text-sm text-[#3D3E1F]` (14px) / `text-xs text-[#6D6A60]` (12px)
 
 ---
 
@@ -124,6 +131,18 @@ The previous modal-based search has been eliminated in favor of an **Inline Anch
   - Tests (Test Code, Name, Department, Price)
   - Reports (Report Number, Status)
 - **Key Navigation:** Supports `ArrowDown`, `ArrowUp`, `Enter` to select, and `Escape` to close the dropdown.
+
+---
+
+## 5.1 Header User Profile Menu & Role Switcher (Prompt 09)
+
+The development role switcher (`toggleRole` pill and header spoofing) has been permanently eliminated in favor of an **Authenticated User Profile Menu**:
+- **Location:** Anchored in the top-right header region.
+- **Avatar Trigger:** Displays a circular badge with the user's uppercase initials (`staff.name.slice(0, 2).toUpperCase()`) and an active acting-role badge (`bg-[#525333] text-white text-[10px] font-semibold px-2 py-0.5 rounded-full`).
+- **Anchored Dropdown:** Clicking the profile trigger opens a floating dropdown container (`bg-[#FAF9F6] border border-[#DCDAD4] rounded-xl shadow-lg p-3 w-64`):
+  - **User Identity Card:** Displays user's full name, staff ID (`#<id>`), and active acting role.
+  - **Multi-Role Switcher:** If the user has more than one assigned role (`user.assigned_roles.length > 1`), an inline role-selection list allows instantaneous switching between assigned roles. Selecting a role dispatches `POST /api/v1/auth/acting-role` and updates acting state without re-authenticating.
+  - **Sign Out Action:** A dedicated sign-out button with `LogOut` icon dispatches `POST /api/v1/auth/logout`, clears active session state, and redirects the client to `/login`.
 
 ---
 
@@ -184,12 +203,22 @@ Invoices are formatted for laser and ink-jet printing on standard A4 paper in la
 
 ---
 
-## 8. In-Context Patient History Nested Overlay
+## 8. In-Context Patient History Nested Overlay & In-Place Modal Patterns
 
+MedScope enforces bidirectional in-place modal overlays so that inspecting cross-linked entities never causes unexpected route switches or state loss:
+
+### 8.1 Patients Page -> Invoice Detail Overlay
 When accessing past invoices from the **Patient History** view (`/patients`):
-- The invoice detail is opened as a **nested modal overlay** over the active patient history drawer.
+- The invoice detail is opened as a **nested modal overlay** (`DualCopyInvoiceModal`) over the active patient history drawer.
 - **Route Preservation:** The application route remains strictly `/patients`. No redirection to `/invoices` occurs.
 - **State Preservation:** Closing the invoice overlay returns the user directly to the patient's active tab (e.g. *Invoices & Tests*), preserving scroll position, active search terms, and selected patient context.
+
+### 8.2 Invoices Page -> Patient History Overlay (Prompt 08)
+When accessing patient details from the **Invoice Detail** view (`/invoices`):
+- The patient history is opened as an **in-place modal overlay** (`PatientHistoryModal`) directly over the Invoices view.
+- **Route Preservation:** The application route remains strictly `/invoices`. No redirection to `/patients` occurs.
+- **State Preservation:** Table search filters, status filter dropdowns, pagination, and scroll positions are 100% preserved. Closing the modal dismisses the overlay without re-rendering or navigating away from the active invoices table.
+- **Shared Component:** Encapsulated in `frontend/src/components/common/PatientHistoryModal.tsx`, reusing the identical 4-tab clinical profile (Overview, Invoices & Tests, Payments, Dues) across both `/invoices` and `/patients`.
 
 ---
 
@@ -270,7 +299,7 @@ In accordance with Module 11 Section 5.4, the technician UI never contains monet
 - **Structured Ultrasound Template:**
   - Organ-by-organ breakdown (Liver, Gallbladder, Pancreas, Spleen, Kidneys, Bladder, Pelvic Organs) with organ-specific findings and consolidated Impression editor.
 - **Narrative Multi-Section Template:**
-  - Clinical History, Technique, Detailed Findings, Impression, and Clinical Comments.
+  - Technique, Detailed Findings, Impression, and Recommendations. (Clinical History field removed). Delta visual indicators excluded by D25.
 
 ### Module 12 Fix Visual Patterns
 - **FIX 1 (Line Lock Decoupling):** Complete removal of the visual `Line Locked` badge from Technician Worklist rows and timeline cards to reduce technician cognitive clutter.
@@ -284,3 +313,78 @@ In accordance with Module 11 Section 5.4, the technician UI never contains monet
   - Technician Worklist: "Submit D15 Refund" action button with amber pill for spoiled/rejected items.
   - Invoice Details Table: Investigation column displays `NOT PERFORMED (D15)` tag and live D15 status pill (`Pending Approval`, `Approved (Awaiting Payout)`, `Disbursed`).
   - Disburse Payout Modal: Dedicated cash/digital payout modal (`DisburseModal`) with payment channel select (`CASH`, `BKASH`, `NAGAD`, etc.) and transaction reference input.
+
+### Prompt 07C Visual & Interaction Invariants
+- **Technician Clinical Response (Fix 5):** Submitting a D15 refund request produces a clinical-only confirmation dialog with status, without showing any pricing, invoice totals, or refund amounts.
+- **Timeline Financial Redaction (Fix 5):** `LifecycleHistoryModal` dynamically redacts all monetary values (`Tk` and `৳`) for `LAB_TECH` viewers, preserving strict counter privacy.
+- **Original Channel Disburse Restriction (Fix 1):** The disbursement dialog strictly restricts selectable payout methods to the payment channels actually used on that invoice's recorded payments.
+- **Immutable Completed Orders (Fix 4):** Result entry interface displays a read-only lock banner on `COMPLETED` test orders, preventing post-completion modifications.
+
+---
+
+## 13. Branded Landing Page & Animated Login UI (Prompt 10)
+
+### 13.1 Landing Page Specification (`/`)
+- **Canvas & Header:**
+  - Background: Flat Platinum (`#E8E7E3`).
+  - Header: Logo mark (Dark Moss rounded square `#525333` with Persian Orange plus `#CF8852`, `rx="8"`) with title "MedScope DCMS" and one primary "Sign in" button (`bg-[#525333] text-white rounded-xl px-6 py-3 font-bold`).
+- **Hero Structure (Two Columns, Responsive Wrap):**
+  - **Left Column:**
+    - H1: "Your diagnostic center, in one place" (capped at 680px width, `text-4xl sm:text-5xl lg:text-6xl font-bold text-[#26270F]`, `text-wrap: balance`).
+    - Subtitle: "Billing, samples, results and reports." (capped at 480px, `text-lg sm:text-xl text-[#3D3E1F]`, `text-wrap: pretty`).
+    - Primary CTA: Single action button "Sign in" (`bg-[#CF8852] hover:bg-[#B7703B] text-[#26270F] font-bold text-lg px-8 py-4 rounded-xl shadow-xs`).
+    - Cleanliness Invariant: No additional marketing sections, pricing tables, testimonials, or invented facts.
+  - **Right Column (Animated Medical Scene):**
+    - Container: Dark Moss rounded card (`bg-[#525333] rounded-3xl p-8 sm:p-10 relative overflow-hidden min-h-[400px]`).
+    - Heartbeat ECG: Self-drawing vector SVG looping continuously via `stroke-dashoffset` (`@keyframes ecg-landing 3.6s cubic-bezier(0.22, 1, 0.36, 1) infinite`).
+    - Specimen Tube: Self-filling and draining tube graphic (`@keyframes fillup 4s cubic-bezier(0.22, 1, 0.36, 1) infinite alternate`).
+    - Travelling Track Dot: Smooth lateral indicator along progress line (`@keyframes travel 4.8s cubic-bezier(0.22, 1, 0.36, 1) infinite alternate`).
+    - Sequential Chips: Step badges fading and translating sequentially: "Sample taken" (0s delay), "Result entered" (2s delay), "Report ready" (4s delay, `#CF8852` accent).
+    - Clinical Privacy: Strictly decorative animation; zero real or fabricated patient data.
+- **Endless Marquee Strip (Workflow Stages):**
+  - Surface: Flat white band (`bg-white border-y border-[#DCDAD4]`).
+  - Dimensions: Capped at **70px total section height** (`py-4 md:py-5`, 28×28 SVG icons, `gap-3 px-6 md:px-8`) for an uncluttered, modern ticker strip.
+  - Driven by a clean **extensible data array** (`WORKFLOW_STEPS` in `frontend/src/features/landing/LandingPage.tsx`).
+  - Items: Register, Sample, Result, Report.
+  - Interactive Behavior: Continuous linear scroll (`animation: marquee 28s linear infinite`); automatically pauses on hover (`:hover`) or keyboard focus (`:focus-within`).
+  - Extensibility: Center administrators can append new workflow phases (e.g., Phlebotomy, Verification, Delivery) directly to the data array without modifying layout markup.
+- **Footer:** Clean minimal branding: "MedScope DCMS".
+
+### 13.2 Animated Login Page Specification (`/login`)
+- **Two-Panel Architecture (Stacked on Mobile Viewports):**
+  - **Left Brand Panel (Dark Moss `#525333`):**
+    - Logo mark: Persian Orange rounded square `#CF8852` with dark plus `#26270F` and title "MedScope DCMS".
+    - Large animated ECG illustration: Centered vector ECG line on subtle baseline (`#E8E7E3` opacity 0.25) looping continuously with pulsing ring marker at peak `(128, 30)` (`@keyframes ecg-login 4.2s`, `@keyframes pulse-ring 2.4s`).
+    - Disclaimer note: "Illustration only. No patient information is shown on this page."
+    - Strict Layout Rule: Zero step cards or clutter tiles on left panel.
+  - **Right Sign-In Panel (Platinum `#E8E7E3` Canvas):**
+    - Centered white rounded container (`bg-white rounded-3xl p-8 sm:p-10 border border-[#DCDAD4] max-w-[420px] w-full shadow-xs`).
+    - Title & Subtitle: "Sign in", "Use your own account. What you see depends on your role."
+    - Real Form Controls:
+      - Visible labels: `<label htmlFor="user">` and `<label htmlFor="pass">`.
+      - Autocomplete tags: `username` and `current-password`.
+      - Show/Hide Password Toggle: Inline button toggles password input type with aria-label.
+      - Full-Width CTA: Persian Orange `#CF8852` button with ink `#26270F` text (font-weight 700), loading state ("Signing in…", disabled), and active scale (`active:scale-[0.98]`).
+      - Inline `aria-live="polite"` Error Area: Calm, polite messages with zero exclamation marks.
+        - Wrong credentials: `"Invalid username or password."`
+        - Lockout: `"This account is locked. Ask your administrator to reset it."`
+        - Session expired: `"Your session has expired. Please sign in again."`
+        - Network error: `"Unable to connect to the server. Check your network connection."`
+      - Helper Links: "Forgot your password? Ask your center administrator to reset it." and "Back to the overview" link pointing to `/`.
+
+### 13.3 Motion & Accessibility Standards
+- **Motion Curve:** All non-continuous animations use the weighted deceleration curve `cubic-bezier(0.22, 1, 0.36, 1)`. The marquee uses a linear progression (`28s linear infinite`).
+- **Continuous Motion Delivery:** Pure SVG and CSS keyframe animations (`ecg-landing`, `ecg-login`, `fillup`, `travel`, `chipin`, `pulse-ring`, `marquee`) are declared at the component level to ensure smooth execution across all Windows and web clients, preventing OS client area animation flags from freezing vector paths or stacking marquee tracks into two vertical rows.
+- **Marquee Layout Geometry:** The marquee strip uses a single-line horizontal flex track (`flex-nowrap`, `width: max-content`) that translates continuously by `-50%`. Hovering or focusing pauses playback cleanly without rewrapping or shifting layout.
+- **390px Viewport Compliance:** Zero horizontal overflow at 390px width (`scrollWidth == clientWidth == 390px`); primary actions ("Sign in") remain visible above the fold without scrolling.
+- **Keyboard Navigation:** Full tab traversal, visible focus rings (`focus-visible:ring-2 focus-visible:ring-[#CF8852]`), and skip-to-content links on both pages.
+
+### 13.4 Branded 404 Page (`NotFoundPage.tsx`)
+- Renders for any unrecognized route (`*`).
+- Centered white bento card on Platinum canvas with brand logo mark, heading "Page not found", explanatory sentence, and contextual navigation button ("Back to workbench" for authenticated users, "Back to home" for guests).
+
+### 13.5 Design Reference & Skill Assets
+- **Visual References:** `docs/design-reference/Landing.dc.html`, `docs/design-reference/Login.dc.html`.
+- **Design Skill:** `docs/design-skills/landing-page-design/SKILL.md` (Part B visual rules enforced with owner brand overrides: MedScope palette, flat backgrounds, self-hosted fonts, and no marketing clutter).
+
+

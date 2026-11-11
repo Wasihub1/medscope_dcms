@@ -605,8 +605,8 @@ Following user manual insertion of 1,200+ diagnostic tests into the PostgreSQL `
 
 ### 1. Module 13 Clinical Result Entry Engine
 - **Three Template Formats:**
-  1. `NUMERIC_TABLE`: Component-driven with live flag preview, delta visual indicators, and reference range comparisons (e.g. CBC, Lipid Profile, Electrolytes, LFT, KFT).
-  2. `NARRATIVE`: Free-text multi-section editor capturing Clinical History, Technique, Findings, Impression, and Recommendations (e.g. Chest X-Ray, ECG).
+  1. `NUMERIC_TABLE`: Component-driven with live flag preview and reference range comparisons (e.g. CBC, Lipid Profile, Electrolytes, LFT, KFT). Delta comparison is excluded by D25.
+  2. `NARRATIVE`: Free-text multi-section editor capturing Technique, Findings, Impression, and Recommendations (e.g. Chest X-Ray, ECG).
   3. Structured `ULTRASOUND`: Organ-by-organ breakdown (Liver, Gallbladder, Biliary Tree, Spleen, Pancreas, Kidneys, Urinary Bladder, Pelvic Organs) with organ-specific findings and consolidated Impression.
 - **Automatic Result Flag Calculation Engine:**
   - Evaluates numeric component values against configured reference bounds: `LOW` (below ref_min), `HIGH` (above ref_max), `CRITICAL` (below critical_min or above critical_max), or `NORMAL` (within ref_min and ref_max).
@@ -658,7 +658,204 @@ Following user manual insertion of 1,200+ diagnostic tests into the PostgreSQL `
   - Code Linter (`oxlint`): Passed with 0 errors.
   - Pytest Suite: 28 automated tests passed in 2.45s (including 8 dedicated tests in `tests/test_prompt07_module13_and_fixes.py` verifying impossible-limit rejection, flag calculations, safe None fallbacks, and boundary conditions).
   - Database Migration: Alembic revision `a7d834bc912e` applied cleanly to PostgreSQL.
-  - Catalog Seed Data: 26 clinical test components seeded with physiological limits and reference ranges.
+  - Catalog Seed Data: 26 clinical test components seeded just-in-time on initial template access (deferred standalone seed script).
+
+---
+
+## Prompt 07C — Safety and Correctness Fixes (Prompt 07B Audit)
+
+### 1. Architectural & Safety Corrections Implemented
+- **Fix 1: Original Payment Channel Enforcement for Refunds (Rules 3.1, D18, M29):**
+  - Updated `disburse_refund` in `refund_service.py` to validate disbursement method against channels actually used on the invoice (`CASH`, `BKASH`, `NAGAD`, `POS_CARD`, `BANK_TRANSFER`).
+  - Mandatory transaction reference number on non-cash disbursements.
+  - Verified per-channel payment balances to prevent cross-channel over-disbursement.
+  - Cash disbursements decrement the active business day drawer.
+  - Applied to both primary and alias disbursement endpoints (`/refunds/{id}/disburse` and `/refunds/disburse/{id}`).
+- **Fix 2: Segregation of Duties on Refund Approvals (Rule 3.6, D56):**
+  - Added isolated helper `enforce_segregation_of_duties` in `refund_service.py`.
+  - Blocks self-approval/rejection (`reviewer_id == requested_by_id`) with HTTP 403 Forbidden.
+  - Emits immutable security audit log `REFUND_SELF_APPROVAL_BLOCKED`.
+  - Isolated in a single function to enable future per-customer configuration (Small Center Mode).
+- **Fix 3: Culture Lifecycle Decoupling (Rule D19, M12):**
+  - Decoupled `culture_stage` (`INCUBATING` -> `PRELIMINARY` -> `FINAL`) from `TestOrder.status`.
+  - Reaching `FINAL` stage leaves order in `IN_PROGRESS` (does NOT auto-complete).
+  - Enforced guard in `update_order_status` and `save_test_result`: culture orders cannot be marked `COMPLETED` unless culture stage is `FINAL`.
+- **Fix 4: Result-Save Guards (Rules 3.2, D24, M13, B10 State Machine):**
+  - **(a) Completed Order Immutability:** Saving results on an already `COMPLETED` order is strictly rejected with HTTP 409 Conflict.
+  - **(b) Draft Status Invariance:** Saving a `DRAFT` result preserves `TestOrder.status` (does NOT prematurely advance to `IN_PROGRESS` or `COMPLETED`).
+  - **(c) Specimen Collection Requirement:** For sample-based tests, attempting to enter or save results before specimen collection is rejected with HTTP 409 Conflict.
+- **Fix 5: Technician Financial Data Isolation (Rule M11.3, 3.8):**
+  - Replaced `RefundRequestResponse` on `POST /worklist/{id}/d15-refund-request` with `D15RefundClinicalResponse` omitting all monetary figures (`amount`, `price`, refund values).
+  - Sanitized historical test-order event descriptions and notes in `get_order_events` to redact monetary amounts (`Tk` and `৳`) for `LAB_TECH` callers while preserving append-only database integrity.
+  - New event descriptions emitted for D15 refund lifecycle are amount-free.
+- **Fix 6: Alembic ORM Model Alignment (Head `a7d834bc912e`):**
+  - Aligned `backend/app/models/result.py` with applied migration `a7d834bc912e`:
+    - Added `ondelete="CASCADE"` to `ResultItem.result_id`.
+    - Added explicit `UniqueConstraint("test_order_id", name="uq_results_test_order_id")` to `Result`.
+  - `alembic check` reports zero new upgrade operations. Single head remains `a7d834bc912e`.
+- **Fix 7: Test Suite Dual-Mode Reliability:**
+  - Updated test client fixtures in `test_prompt04_corrections.py`, `test_receptionist_e2e.py`, and `test_prompt07c_fixes.py` to seamlessly execute in-process via FastAPI `TestClient` when port 8000 is inactive, or against a live server when running.
+  - Added comprehensive automated test suite `tests/test_prompt07c_fixes.py` covering Fixes 1–5.
+  - Full test suite passes 100% in both modes (35 passed, 0 failed).
+
+### 2. Current State & Known Limitations
+- Current migration head: `a7d834bc912e` (single head, 25 domain tables + 1 alembic_version = 26 tables).
+- Endpoints: 62 unique paths / 72 operations registered under `/api/v1/`.
+- Deferred features:
+  - Sex/age-band reference range versioning (D24).
+  - Barcode scan direct-open in worklist (M11.4).
+  - Invoice detail auto-refresh on order updates.
+  - Imaging lock timing alteration (scan completion vs result completion) and Owner emergency unlock (D13/D14).
+  - Centralized configurable permission/role settings table.
+  - Module 14: Draft to Final report publishing, verification, and PDF delivery.
+
+---
+
+## Prompt 08 — Modal Navigation Fix, Test DB Isolation, and Test Record Identification
+
+### 1. Architectural & Engineering Fixes Implemented
+- **Part A: In-Place Modal Navigation & URL Preservation:**
+  - **Problem Solved:** Opening patient history from the invoice detail modal previously called `navigate('/patients?id=...')`, which dismounted the Invoices page, switched the active sidebar tab to Patients, lost search filters, status filters, and scroll position, and left the user stranded on `/patients` when dismissed.
+  - **Encapsulated Component:** Created `frontend/src/components/common/PatientHistoryModal.tsx` managing its own 4-tab clinical profile (Overview, Invoices & Tests, Payments, Dues) and nested invoice detail modal.
+  - **In-Place Overlay:** Wired `PatientHistoryModal` into `InvoicesPage.tsx` so clicking "Patient History" displays an overlay directly over the invoices table with zero route switching (`/invoices` remains unchanged). Closing the modal cleans up query params without route disruption.
+  - **PatientsPage Refactoring:** Refactored `frontend/src/features/patients/PatientsPage.tsx` to reuse `PatientHistoryModal`, eliminating ~350 lines of duplicate JSX drawer code.
+  - **Playwright Regression Suite:** Created `frontend/e2e/test_modal_regression.spec.ts` covering all 6 modal/drawer surfaces across roles (Invoices detail, Invoices->History, Patients history, Dues settlement, Ready Reports preview, Technician Worklist modals). All role switching is encapsulated in `selectDevRole`. 6 passed in 14.4s.
+- **Part B: Test Database Isolation & Hard Safety Guard:**
+  - **Isolated Test Database:** Provisioned `medscope_test` owned by `medscope_app`.
+  - **Hard Safety Guard:** Added `enforce_safety_guard` in `tests/conftest.py`. Compares normalized host, port, and database targets. If `TEST_DATABASE_URL` resolves to `medscope_dcms`, pytest immediately aborts with `pytest.UsageError` (Exit code 4).
+  - **Alembic Migration Chain:** Verified running from `<base>` to `a7d834bc912e (head)` cleanly on an empty database.
+  - **Deterministic Seed Fixture:** `setup_test_database` seeds tenant `center-seba-01`, staff accounts, 25 diagnostic tests, test destinations, referrers, and CBC components.
+  - **Pure In-Process Execution:** Completely removed live-server port 8000 probing fixtures. All tests execute in-process via FastAPI `TestClient` with `app.dependency_overrides[get_db]`. 35 tests pass in 2.99s.
+- **Part C: Test Record Identification & Main DB Backup:**
+  - **Strict Read-Only Guarantee:** Zero writes, updates, or deletions executed against `medscope_dcms`.
+  - **Safety Dump:** Binary pg_dump snapshot saved to git-ignored `backups/medscope_dcms_pre_prompt08.dump` (191,737 bytes).
+  - **Forensic Investigation:** Identified 106 test patients, 93 test referrers, 180 test invoices, 189 test lines, 146 test payments, 76 test refund requests, 189 test orders, 121 test events, 22 test samples, 3 test results, 46 test audit logs, 50 test reprint logs.
+  - **Candidate Report & Dependency Map:** Documented in `report/TEST_RECORD_CANDIDATES.md` with complete dependency graph, operational impact analysis, and cleanup recommendations for future execution.
+
+### 2. Current State & Next Steps
+- Primary database (`medscope_dcms`): Untouched, backed up, candidate test records identified.
+- Test database (`medscope_test`): Migrated, isolated, verified by hard safety guard, passing all 35 tests.
+- Next prompt: `Prompt_09_Role_Based_Authentication_and_Switcher_Removal.md` (RBAC, JWT/session authentication, removal of dev role switcher).
+- Followed by: `Prompt_10_Login_and_Landing_Page_UI.md`.
+
+---
+
+## Prompt 09 — Real Role-Based Authentication and Dev Switcher Removal
+
+### 1. Architectural & Engineering Implementations
+- **Removal of Insecure Development Role Switcher:**
+  - Completely excised the header-based role switcher component, state toggling (`actorMode`, `toggleRole`, `setMode`), and request headers (`X-Staff-Id`, `X-Staff-Role`, `X-Actor-*`).
+  - Added authenticated user profile menu to the global header with staff name, department, acting role badge, multi-role switcher list, and sign-out button.
+- **Data Model & Alembic Migration (`b9e41d82f05a`):**
+  - Table `staff_roles`: Multi-role mapping allowing a person to hold several roles (`RECEPTIONIST`, `CASHIER`, `ADMIN`, `OWNER`, `LAB_TECH`), seeded from each existing person's primary role.
+  - Table `auth_sessions`: Server-side session management storing SHA-256 hashed session tokens, tenant ID, acting role, expiration, idle timeout timestamps, and revocation status.
+  - Table `staff`: Added security fields `password_hash`, `failed_attempts`, `locked_at`, `last_login_at`, and `password_changed_at`.
+- **Cryptographic Password Hashing & Brute-Force Lockout:**
+  - Password hashing via Argon2id (`argon2-cffi`).
+  - Enforced minimum 8 characters and disallowance of password matching username.
+  - 5 failed login attempts trigger automated account lockout (`locked_at = utc_now()`) requiring Admin/Owner unlock.
+  - Generic error messages for failed attempts (`"Invalid username or password"`) preventing username enumeration.
+- **Session Transport & CSRF Protection:**
+  - `HttpOnly`, `SameSite=Lax`, `Path=/` session cookie (`medscope_session`) or `Authorization: Bearer <token>` for API clients.
+  - `X-Requested-With: XMLHttpRequest` required on all state-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`).
+  - Idle timeout (120 minutes) and absolute session lifetime (24 hours).
+- **Authentication API Endpoints (`/api/v1/auth/...`):**
+  - `POST /auth/login`: Authenticates credentials, creates session, sets HttpOnly cookie, returns acting role profile.
+  - `POST /auth/logout`: Revokes session and clears cookie.
+  - `GET /auth/me`: Returns active authenticated profile.
+  - `POST /auth/acting-role`: Switches active role within current session among roles held by user.
+  - `POST /auth/change-password`: Validates old password and sets new hash, revoking other sessions.
+  - `POST /auth/users/{id}/reset-password`: Admin/Owner password reset.
+  - `POST /auth/users/{id}/unlock`: Admin/Owner account unlock.
+- **User Administration CLI (`backend/scripts/manage_users.py`):**
+  - Commands: `list-users`, `set-password`, `create-user`, `assign-role`, `remove-role`, `unlock`, `lock`, `init-staff-passwords`.
+  - Passwords read securely via `getpass` or `--password-env`, never CLI arguments.
+- **Frontend Workstation Access & Route Guards:**
+  - Functional `/login` page with Bento styling, 60-30-10 palette tokens, and clear lockout alerts.
+  - Protected route wrapper redirecting unauthenticated users to `/login`.
+  - Global 401 response interceptor clearing session and routing to `/login`.
+  - Role-based landing routes: Receptionist/Cashier -> `/invoices`, Lab Tech -> `/worklist`, Admin/Owner -> `/`.
+- **Automated Test Suite (Pure In-Process, Isolated):**
+  - Rewrote fixtures in `tests/conftest.py` with deterministic test sessions and Argon2id test passwords.
+  - Added `tests/test_prompt09_auth.py` (10 tests) covering login, wrong password, 5-attempt lockout, admin unlock, 401 unauthenticated, logout revocation, password change, acting role switch, real session role guards, and technician financial isolation.
+  - Full test suite: **45 passed in 4.19s** against `medscope_test`. Zero writes to `medscope_dcms`.
+
+### 2. Current State & Next Steps
+- Primary database (`medscope_dcms`): Upgraded to `b9e41d82f05a` (28 tables), untouched operational records (223 invoices), 0 test session rows.
+- Next prompt: Completed Prompt 10. Ready for next prompt.
+
+---
+
+## Prompt 10 — Branded Landing Page and Animated Login UI
+
+### 1. Architectural & Engineering Implementations
+- **Public Branded Landing Page (`/`):**
+  - Two-column responsive hero: H1 "Your diagnostic center, in one place" (max width 680px, balanced wrapping), subtitle "Billing, samples, results and reports.", single Persian Orange CTA "Sign in".
+  - Animated medical scene inside Dark Moss panel (`#525333`): self-drawing ECG heartbeat line (`@keyframes ecg-landing`), filling/draining specimen tube (`@keyframes fillup`), travelling progress dot (`@keyframes travel`), and sequential chips ("Sample taken", "Result entered", "Report ready"). Purely decorative; zero patient data.
+  - Endless scrolling strip (marquee): White band under hero. Tightened to **70px total section height** (`py-4 md:py-5`, 28×28 SVG icons, `gap-3 px-6 md:px-8`). Driven by an extensible `WORKFLOW_STEPS` data array (Register, Sample, Result, Report). Continuous linear loop (`28s linear infinite`), auto-pausing on hover or focus-within.
+  - Motion Architecture: Guaranteed pure CSS/SVG animation playback across all OS client area animation flags. Eliminated destructive reduced-motion overrides that previously stopped ECG drawing or forced double-row marquee wrapping.
+- **Operational Roles & Credential Provisioning:**
+  - Initialized Argon2id credentials for all 4 diagnostic staff members in `medscope_dcms` (password: `12345`).
+  - Active role assignments: `admin_tariq` (`ADMIN`, `OWNER`), `reception_fatima` (`RECEPTIONIST`, `CASHIER`), `tech_kamal` (`LAB_TECH`), `tech_nasrin` (`LAB_TECH`).
+  - Multi-role header switcher enables seamless toggling between Admin/Owner and Receptionist/Cashier without re-authentication.
+  - CLI [`backend/scripts/manage_users.py`](file:///d:/DMS/MedScope/backend/scripts/manage_users.py) enhanced with `--force` flag for administrative credential assignment.
+- **Animated Login Page (`/login`):**
+  - Two-panel responsive layout (stacks vertically on mobile viewports).
+  - Left panel (Dark Moss `#525333`): Brand logo mark, animated vector ECG line with baseline and pulsing ring marker at peak `(128, 30)`, disclaimer "Illustration only. No patient information is shown on this page." Zero step cards.
+  - Right panel (Platinum `#E8E7E3` canvas): Centered white rounded container (`max-w-[420px]`), heading "Sign in", helper copy, real `<form>` with Username, Password with Show/Hide toggle, Persian Orange `#CF8852` full-width button (shows "Signing in…" when submitting), and inline `aria-live="polite"` error banner.
+  - Calm, specific error messages: wrong credentials, locked account, session expired, network failure.
+  - Helper links: "Forgot your password? Ask your center administrator to reset it." and "Back to the overview" link to `/`.
+- **Public Entry & Role Home Redirection (`getRoleHomeRoute`):**
+  - Signed-in users who open `/` or `/login` are automatically redirected to their role's workbench (`/invoices` for Receptionist/Cashier, `/worklist` for Lab Tech, `/dashboard` for Admin/Owner).
+  - Authenticated route `/dashboard` added for executive overview.
+  - Unknown paths (`*`) render a branded 404 page (`NotFoundPage.tsx`) with "Back to home" / "Back to workbench".
+- **Self-Hosted Typography & Brand Tokens:**
+  - Installed and bundled `@fontsource/manrope` and `@fontsource/noto-sans-bengali`. Zero external CDN or Google Fonts requests.
+  - Palette: Persian Orange `#CF8852` (accent), Platinum `#E8E7E3` (canvas), Dark Moss `#525333` (panels), ink `#26270F` (text), secondary `#3D3E1F`, white `#FFFFFF`. Button text on orange is ink `#26270F` (contrast ratio ~7:1).
+  - Flat backgrounds only; no background gradients.
+  - Motion tokens: non-continuous curve `cubic-bezier(0.22, 1, 0.36, 1)`, linear marquee, and complete `@media (prefers-reduced-motion: reduce)` fallbacks.
+  - Branded SVG favicon created from logo mark (`frontend/public/favicon.svg`).
+- **Limited Browser Exception (Playwright Chromium Screenshots):**
+  - Automated script `frontend/scripts/capture_screenshots.mjs` captured 5 screenshots under `report/screenshots/`:
+    - `landing-desktop.png` (1360x900)
+    - `landing-mobile.png` (390x844)
+    - `login-desktop.png` (1360x900)
+    - `login-mobile.png` (390x844)
+    - `404-desktop.png` (1360x900)
+  - 390px check: `scrollWidth = 390`, `clientWidth = 390`, `hasOverflow = false` on both pages.
+- **Verification & Testing Results:**
+  - Backend pytest: 45 passed in 4.43s against `medscope_test`.
+  - Frontend typecheck: `tsc -b` exited 0.
+  - Frontend linter: `oxlint` reported 0 errors across 39 files.
+  - Production build: `vite build` completed in 670ms.
+  - Database migrations: single head `b9e41d82f05a`, 0 new migrations.
+
+---
+
+## Prompt 10B — Test Data Cleanup SQL Script
+
+### 1. Architectural & Engineering Implementations
+- **Single Standard PostgreSQL Deliverable:**
+  - Script path: [`backend/scripts/sql/cleanup_test_data.sql`](file:///d:/DMS/MedScope/backend/scripts/sql/cleanup_test_data.sql).
+  - Designed for execution directly by the owner inside the **pgAdmin Query Tool** (pure standard SQL, zero `psql` meta-commands).
+- **Safety Guarantees & Evidence-Based Filtering:**
+  - Zero mutations performed directly against live `medscope_dcms` during implementation (read-only queries and dry-run transactional simulations only).
+  - Strictly eliminated all range deletions (e.g. `invoices.id >= 6` is strictly prohibited); deletions rely 100% on evidence matching (exact test naming patterns, automated reason markers, and topological child cascading).
+  - Protected entities: `staff`, `staff_roles`, `auth_sessions`, `tests` (1,250 tests), `test_components`, `test_destinations`, `business_days`, `sequence_counters`, `alembic_version`, 16 protected patients (12 seed + 4 QA: Jamila Begum, Waasi, Wasir beta, Wassir beti), 16 protected referrers (10 seed + 3 QA: Dr. Salehin, Asst. Prof. Dr. Arif Jawad, Rafiq, plus referrers 11, 31, 35 referenced by QA invoices), and 14 protected invoices (9 seed + 5 QA: SD-000031, SD-000066, SD-000099, SD-000135, SD-000136).
+- **Four Script Sections in Order:**
+  - Section 1: Header comments, scope, protected entities, fresh custom `.dump` backup instructions in pgAdmin (warning against old Prompt 08 dump), and restore procedure.
+  - Section 2: Configuration & PREVIEW (read-only): temp table `_cleanup_config` (`include_medium`, default `TRUE`), candidate temp tables per entity, preview summary result sets per table/tier, and list of kept protected entities.
+  - Section 3: Deletion Transaction: `BEGIN;` followed by `DO $$ ... $$` executing deletions in topological order, emitting `RAISE NOTICE` for row counts per table, and inserting a single summary audit log `TEST_DATA_CLEANUP`.
+  - Section 4: Post-checks & Default ROLLBACK: automated orphan checks across all foreign keys, kept entity count assertions (16 patients, 16 referrers, 14 invoices), business day balance notice, ending with `ROLLBACK;` (switch to `COMMIT;` to persist).
+- **Topological Deletion Sequence:**
+  `audit_logs` -> `reprint_logs` -> `report_deliveries` -> `report_versions` -> `result_items` -> `results` -> `samples` -> `assignment_history` -> `test_order_events` -> `refund_requests` -> `test_orders` -> `payments` -> `invoice_lines` -> `invoices` -> `visits` -> `referrers` -> `patients` -> `audit_logs` summary insert.
+- **Cash Drawer & Business Day Policy:**
+  Recomputation of Day 2 stored cash received (70,430 Taka) diverges from raw payment sum (72,830 Taka) by 2,400 Taka due to historical pre-seeded floats/untracked adjustments. Per Prompt 10B rules, balances are left **untouched** with a warning notice printed in script output.
+- **Candidate Elimination Counts:**
+  - With `include_medium = TRUE` (default): Deletes 135 patients, 115 referrers, 209 invoices, 209 visits, 218 invoice lines, 151 payments, 218 test orders, 153 events, 155 assignments, 29 samples, 3 results, 0 result items, 0 report versions, 0 report deliveries, 78 refund requests, 48 reprint logs, 587 audit logs.
+  - Preserves exactly: 16 patients, 16 referrers, 14 invoices, 14 visits, 48 invoice lines, 15 payments, 48 test orders, 16 events, 23 assignments, 9 samples, 2 results, 0 result items, 6 report versions, 4 report deliveries, 2 refund requests, 44 reprint logs, 72 audit logs.
+- **Rehearsal Database Boundary:**
+  Attempted `CREATE DATABASE medscope_cleanup_rehearsal`. PostgreSQL user `medscope_app` lacks `CREATEDB` privilege (`permission denied to create database`). Formally reported as **Blocked** per Prompt 10B Section 5 clause. Script verified via transactional dry-run simulation and static catalog validation.
 
 ---
 

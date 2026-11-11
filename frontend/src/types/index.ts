@@ -543,5 +543,24 @@ export interface ResultTemplateData {
   existing_result?: ResultRecord | null;
 }
 
+export interface AuthUser {
+  id: number;
+  tenant_id: string;
+  username: string;
+  display_name: string;
+  roles: Role[];
+  acting_role: Role;
+  department?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  home_route: string;
+}
+
+export interface AuthMessageResponse {
+  message: string;
+  success: boolean;
+}
+
+
 
 

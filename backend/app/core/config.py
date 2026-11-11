@@ -32,6 +32,14 @@ class Settings(BaseSettings):
     CORS_ORIGINS: Union[str, List[str]] = "http://localhost:5173,http://127.0.0.1:5173"
     FRONTEND_URL: str = "http://localhost:5173"
 
+    # Authentication & Session Settings (Prompt 09)
+    SESSION_COOKIE_NAME: str = "medscope_session"
+    SESSION_COOKIE_SECURE: bool = False
+    SESSION_COOKIE_SAMESITE: str = "lax"
+    SESSION_IDLE_TIMEOUT_MINUTES: int = 120  # 2 hours idle timeout
+    SESSION_ABSOLUTE_LIFETIME_HOURS: int = 24  # 24 hours absolute maximum lifetime
+    AUTH_MAX_FAILED_ATTEMPTS: int = 5
+
     model_config = SettingsConfigDict(
         env_file=(".env", "backend/.env"),
         env_file_encoding="utf-8",

@@ -184,3 +184,103 @@ sequenceDiagram
     Modal->>Hist: Dismisses modal
     Note over Pat,Hist: User is right back on Patients Page,<br/>same patient, "Invoices & Tests" tab active,<br/>scroll position preserved.
 ```
+
+---
+
+## 5. Public Entry, Role Redirection, and Authentication Lifecycle
+
+### 5.1 Public Entry & Workbench Redirection
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Visitor as Browser Client / Staff
+    participant Router as React Router
+    participant Land as LandingPage (/)
+    participant Log as LoginPage (/login)
+    participant Auth as AuthContext (Client State)
+    participant Err as NotFoundPage (*)
+
+    alt Visitor Accesses "/" (Overview)
+        Router->>Land: Mounts LandingPage
+        Land->>Auth: Check isAuthenticated & user
+        alt User is Signed-In
+            Land-->>Router: Redirect to Role Home Route (getRoleHomeRoute)
+        else User is Guest (Unauthenticated)
+            Land->>Visitor: Renders Public Hero with 70px Workflow Marquee
+        end
+    else Visitor Accesses "/login" (Direct Sign-In)
+        Router->>Log: Mounts LoginPage
+        Log->>Auth: Check isAuthenticated & user
+        alt User is Signed-In
+            Log-->>Router: Redirect to Role Home Route (getRoleHomeRoute)
+        else User is Guest (Unauthenticated)
+            Log->>Visitor: Renders Animated Login Page
+        end
+    else Visitor Accesses Unknown Route (e.g. "/random-page")
+        Router->>Err: Mounts NotFoundPage
+        Err->>Visitor: Renders Branded 404 Card with "Back to home" / "Back to workbench"
+    end
+```
+
+### 5.2 Sign-In Error Mapping Lifecycle
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Staff as Staff Member
+    participant Form as LoginForm (/login)
+    participant API as Auth API Client
+    participant AuthEP as POST /api/v1/auth/login
+
+    Staff->>Form: Enters username & password, clicks "Sign in"
+    alt Client Fields Empty
+        Form->>Staff: Inline warning: "Please enter both your username and password."
+    else Submitting Request
+        Form->>Form: Button disabled, text: "Signing in…"
+        Form->>API: login(cleanUser, password)
+        API->>AuthEP: POST /api/v1/auth/login
+        alt HTTP 401 Unauthorized
+            AuthEP-->>API: 401 ("Invalid username or password")
+            API-->>Form: Throws Error
+            Form->>Staff: Polite Banner: "Invalid username or password."
+        else HTTP 423 Locked
+            AuthEP-->>API: 423 ("Account is locked due to too many failed attempts...")
+            API-->>Form: Throws Error
+            Form->>Staff: Polite Banner: "This account is locked. Ask your administrator to reset it."
+        else Network / Connection Failure
+            API-->>Form: NetworkError
+            Form->>Staff: Polite Banner: "Unable to connect to the server. Check your network connection."
+        else Session Expired during Action
+            API-->>Form: SessionExpired
+            Form->>Staff: Polite Banner: "Your session has expired. Please sign in again."
+        end
+    end
+```
+
+### 5.3 Operational Roles and Staff Provisioning Lifecycle
+MedScope DCMS enforces five distinct tenant operational roles: `OWNER`, `ADMIN`, `RECEPTIONIST`, `CASHIER`, and `LAB_TECH`.
+
+```mermaid
+flowchart TD
+    CLI["User Management CLI\n(backend/scripts/manage_users.py)"] -->|Provision / Set Password| DB[(Database Staff & Roles)]
+    
+    DB --> U1["admin_tariq\nRoles: ADMIN, OWNER"]
+    DB --> U2["reception_fatima\nRoles: RECEPTIONIST, CASHIER"]
+    DB --> U3["tech_kamal\nRole: LAB_TECH"]
+    DB --> U4["tech_nasrin\nRole: LAB_TECH"]
+    
+    U1 -->|Default Route| WB1["/dashboard (Executive Overview)"]
+    U1 -.->|Header Role Switch| WB2["/ (Owner Mode)"]
+    U2 -->|Default Route| WB3["/invoices (Patient Intake & Billing)"]
+    U2 -.->|Header Role Switch| WB4["/invoices (Cashier Session Mode)"]
+    U3 -->|Default Route| WB5["/worklist (Technician Workbench)"]
+    U4 -->|Default Route| WB5
+```
+
+- **Authentication Management CLI:** [`backend/scripts/manage_users.py`](file:///d:/DMS/MedScope/backend/scripts/manage_users.py) provides subcommands:
+  - `list-users`: Lists all provisioned staff, active roles, and lockout status.
+  - `set-password`: Updates password for an existing staff member (supports `--force` for development initialization).
+  - `init-staff-passwords`: Batch initializes credentials for standard staff members.
+  - `assign-role`: Grants additional roles to a user, enabling multi-role header switching.
+  - `create-user`: Provisions new staff accounts with custom role sets.
+- **Multi-Role Header Switching:** Users with multiple assigned roles (e.g., `admin_tariq` holding `ADMIN` and `OWNER`, or `reception_fatima` holding `RECEPTIONIST` and `CASHIER`) switch active roles instantly via the header profile avatar without re-authenticating. The change is persisted in the session and auditable in the database.
+

@@ -135,16 +135,17 @@ MedScope defines two levels of identity: **Tenant Staff** and **Platform Dev**.
 
 ### 4.11 Clinical Result Entry & Data Verification (Module 13)
 - **Three Template Formats:**
-  1. `NUMERIC_TABLE`: Structured component grid with units, reference ranges, live flag badges (`LOW`, `HIGH`, `CRITICAL`, `NORMAL`), and impossible-value limits.
-  2. `NARRATIVE`: Free-text reporting with Clinical History, Technique, Findings, Impression, and Recommendations.
+  1. `NUMERIC_TABLE`: Structured component grid with units, reference ranges, live flag badges (`LOW`, `HIGH`, `CRITICAL`, `NORMAL`), and impossible-value limits. Delta visual indicators are excluded by D25.
+  2. `NARRATIVE`: Free-text reporting with Technique, Findings, Impression, and Recommendations.
   3. Structured `ULTRASOUND`: Organ-by-organ reporting (Liver, Gallbladder, Spleen, Pancreas, Kidneys, Bladder, Pelvic Organs) with consolidated Impression.
 - **Automatic Flag Mechanics:**
-  - Evaluates numeric component values against configured reference bounds.
-  - Safe `None` Fallback: Incomplete or missing reference ranges NEVER silently default to NORMAL; flag remains `None`.
+  - Evaluates numeric component values against configured reference bounds: `LOW`, `HIGH`, `CRITICAL`, `NORMAL`.
+  - Automatic flags are **kept** (superseding earlier drop discussions); technicians **cannot** select or override flags (computed deterministically by the system).
+  - Safe `None` Fallback: Incomplete or missing reference ranges NEVER silently default to NORMAL; flag remains `None`. Automatic critical-result alerts remain excluded.
 - **Physiological Impossible-Value Rejection:**
   - Absurd inputs outside physiological viability limits (e.g., Hemoglobin `2.0 - 25.0 g/dL`) are immediately rejected with HTTP 400 Bad Request.
 - **Reference Range Snapshot Invariant (D24):**
-  - Result entry permanently snapshots reference intervals and units into `result_items` at the time of entry to prevent historical reports from drifting when catalog values are updated.
+  - Result entry permanently snapshots reference intervals and units into `result_items` at the time of entry to prevent historical reports from drifting when catalog values are updated. (Sex/age-band dynamic versioning is deferred).
 - **Strict Module 14 Boundary (Exclusions):**
   - Module 13 strictly handles data entry and draft/entered saving.
   - Excluded and deferred to Module 14: Doctor digital approval signatures, report finalization, multi-specialist verification, public authenticity QR codes, and report printing/handover.
@@ -158,5 +159,67 @@ MedScope defines two levels of identity: **Tenant Staff** and **Platform Dev**.
   - Technicians can submit a D15 refund request directly from the worklist (`request_type = "D15_NOT_PERFORMED"`, `status = "PENDING_ADMIN_APPROVAL"`).
   - Invoices view displays D15 status on the affected line and blocks generic pre-sample cancellation on locked lines.
   - Two-Stage Refund Separation: Admin approval marks the request `APPROVED` and invoice `REFUND_APPROVED`; money disbursement is separate and performed by the Cashier/Admin, recording the payout channel (`CASH`, `BKASH`, `NAGAD`, etc.), drawer deduction, and reversing referral commissions.
+
+### 4.13 Prompt 07C Safety, Correctness, and Product Governance Invariants
+- **Original Payment Channel Enforcement (Fix 1 / Rules 3.1, D18, M29):**
+  - Refund disbursement is strictly restricted to payment methods actually recorded on the invoice. Non-cash refunds require mandatory transaction reference numbers. Per-channel disbursements cannot exceed the net amount received on that channel.
+- **Segregation of Duties on Refund Approvals (Fix 2 / Rule 3.6, D56):**
+  - Self-approval is blocked by default (`reviewer_id == requested_by_id` returns HTTP 403 Forbidden with audit row `REFUND_SELF_APPROVAL_BLOCKED`).
+  - Isolated in `enforce_segregation_of_duties` for future customer configuration ("Small Center Mode").
+  - Day open/close roles and who may disburse approved refunds are not permanently fixed: current settings are development defaults; a single centralized, configurable role-permission layer is planned. Only Admin/Owner approve refunds.
+- **Culture Lifecycle Decoupling (Fix 3 / Rule D19, M12):**
+  - Moving culture stage to `FINAL` does not auto-complete the order; culture order completion requires normal result entry and verification after reaching the `FINAL` stage.
+- **Result-Save Guards (Fix 4 / Rules 3.2, D24, M13, B10):**
+  - Modifying or resaving results on a `COMPLETED` order is rejected with HTTP 409 Conflict.
+  - Saving a `DRAFT` result does not advance order status (order remains in current state, e.g. `IN_PROGRESS` or `SAMPLE_PENDING`).
+  - Sample-based investigations reject saving results prior to specimen collection with HTTP 409 Conflict.
+- **Technician Financial Data Isolation (Fix 5 / Rule M11.3, 3.8):**
+  - Technician D15 refund requests return `D15RefundClinicalResponse` omitting amount, price, and refund values.
+  - Historical and runtime order lifecycle events are sanitized to redact monetary amounts (`Tk` and `৳`) for `LAB_TECH` callers.
+
+### 4.14 Prompt 08 Operational Invariants & Integrity Boundaries
+- **In-Place Modal Overlay Pattern:**
+  - Navigating from within an invoice detail or sub-view to inspect patient history must never alter the browser route (`/invoices`), unmount background components, or discard table search/status filters and scroll position.
+  - Encapsulated within `PatientHistoryModal` and presented as an in-place modal overlay.
+- **Strict Test Database Isolation:**
+  - Automated testing is strictly barred from touching the primary operational database (`medscope_dcms`).
+  - Pytest runs against `medscope_test` with a hard safety guard rejecting any target resolving to `medscope_dcms`.
+- **Read-Only Test Record Identification & Backup:**
+  - Forensic inspection of test records in `medscope_dcms` is strictly read-only; no automated or manual deletions may occur without a verified offline backup and explicit approval.
+
+### 4.15 Real Role-Based Authentication & Multi-Role Governance (Prompt 09)
+- **Multi-Role Assignment per Person (Rule M1.1):**
+  - A staff member may hold multiple operational roles simultaneously (e.g. `RECEPTIONIST` and `CASHIER`, or `ADMIN` and `OWNER`), persisted in `staff_roles`.
+  - Permissions are strictly validated against the user's active acting role within their authenticated session.
+- **Acting Role Attribution on Every Action (Rule D57):**
+  - All audit log events and operational records persist the user's current `acting_role`.
+  - Multi-role users can switch acting role within their active session via `POST /api/v1/auth/acting-role`. Attempting to act in an unheld role is strictly rejected with HTTP 403 Forbidden.
+- **Brute-Force Account Lockout (Rules M1, D58):**
+  - 5 consecutive failed password attempts trigger automated account lockout (`locked_at = utc_now()`).
+  - Locked accounts are barred from authentication (HTTP 403 Forbidden) across all channels until explicitly unlocked by an Admin or Owner.
+- **Permanent Removal of Development Role Switcher:**
+  - Header-based role spoofing (`X-Staff-Id`, `X-Staff-Role`) is completely eliminated.
+  - All protected endpoints strictly mandate an active, cryptographically hashed server-side session.
+- **Role-Based Workstation Landing Routes:**
+  - `RECEPTIONIST` / `CASHIER` -> `/invoices` (Intake and billing counter)
+  - `LAB_TECH` -> `/worklist` (Technician workbench with financial isolation)
+  - `ADMIN` / `OWNER` -> `/dashboard` (Executive center dashboard)
+
+### 4.16 Public Entry Surface, Role-Based Route Gating & Brand Standards (Prompt 10)
+- **Public Entry Point Isolation:**
+  - Route `/` serves as the public branded marketing and overview surface for prospective clients and staff.
+  - Route `/login` serves as the public workstation gateway.
+  - Route `/dashboard` serves as the authenticated operational dashboard for authorized staff.
+- **Signed-In User Redirection:**
+  - Authenticated staff opening `/` or `/login` are automatically redirected to their role's home route (`/invoices` for Receptionist/Cashier, `/worklist` for Lab Tech, `/dashboard` for Admin/Owner).
+- **Clinical Privacy & Decorative Invariants:**
+  - Public marketing illustrations (ECG line, sample tube, progress dot) are strictly decorative; zero real or fabricated patient data, test numbers, prices, or doctor names may appear on public surfaces.
+- **Extensible Workflow Strip:**
+  - The workflow stages marquee strip is driven by a data array (`WORKFLOW_STEPS`), allowing center leadership to append or reorder clinical operational phases without modifying presentation markup.
+- **Accessible & Self-Hosted Typography:**
+  - Typography is 100% self-hosted (`@fontsource/manrope`, `@fontsource/noto-sans-bengali`); zero external CDN or Google Fonts calls.
+  - Respects `@media (prefers-reduced-motion: reduce)` by disabling animations and presenting static resting states.
+
+
 
 

@@ -18,6 +18,7 @@ import { InvoiceSummary, Invoice, PaymentStatus } from '../../types';
 import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
 import { DualCopyInvoiceModal } from '../../components/common/DualCopyInvoiceModal';
+import { PatientHistoryModal } from '../../components/common/PatientHistoryModal';
 import {
   formatPaymentStatus,
   formatRefundStatus,
@@ -60,12 +61,25 @@ export const InvoicesPage: React.FC = () => {
   const [disburseRef, setDisburseRef] = useState<string>('');
   const [submittingDisburse, setSubmittingDisburse] = useState(false);
 
-  const [searchParams] = useSearchParams();
+  // In-place Patient History Modal state (preserves Invoices tab and filters)
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [historyPatientId, setHistoryPatientId] = useState<string | number | null>(null);
+
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const idParam = searchParams.get('id');
   const searchParam = searchParams.get('search');
 
   const { showToast } = useToast();
+
+  const handleCloseDetail = () => {
+    setDetailModalOpen(false);
+    if (idParam) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('id');
+      setSearchParams(next, { replace: true });
+    }
+  };
 
   useEffect(() => {
     if (searchParam) {
@@ -367,7 +381,7 @@ export const InvoicesPage: React.FC = () => {
       {/* Invoice Detail Modal */}
       <Modal
         isOpen={detailModalOpen}
-        onClose={() => setDetailModalOpen(false)}
+        onClose={handleCloseDetail}
         title={selectedInvoice ? `Invoice Details — ${selectedInvoice.invoice_number}` : ''}
         subtitle={selectedInvoice ? `MRN: ${selectedInvoice.patient_mrn} | Patient: ${selectedInvoice.patient_name}` : ''}
         maxWidth="2xl"
@@ -439,12 +453,12 @@ export const InvoicesPage: React.FC = () => {
                                   {line.d15_refund_status === 'PENDING_ADMIN_APPROVAL'
                                     ? 'Refund Pending Admin Approval'
                                     : line.d15_refund_status === 'APPROVED'
-                                    ? 'Refund Approved (Pending Payout)'
-                                    : line.d15_refund_status === 'REJECTED'
-                                    ? `Refund Rejected: ${line.d15_refund_reason || ''}`
-                                    : line.d15_refund_status === 'DISBURSED'
-                                    ? 'Refund Disbursed'
-                                    : line.d15_refund_status}
+                                      ? 'Refund Approved (Pending Payout)'
+                                      : line.d15_refund_status === 'REJECTED'
+                                        ? `Refund Rejected: ${line.d15_refund_reason || ''}`
+                                        : line.d15_refund_status === 'DISBURSED'
+                                          ? 'Refund Disbursed'
+                                          : line.d15_refund_status}
                                 </span>
                               )}
                             </div>
@@ -582,8 +596,8 @@ export const InvoicesPage: React.FC = () => {
                               req.status === 'APPROVED' || req.status === 'EXECUTED'
                                 ? 'success'
                                 : req.status === 'REJECTED'
-                                ? 'danger'
-                                : 'warning'
+                                  ? 'danger'
+                                  : 'warning'
                             }
                             size="sm"
                           >
@@ -656,9 +670,10 @@ export const InvoicesPage: React.FC = () => {
                 )}
                 <button
                   type="button"
+                  data-testid="invoice-detail-patient-history-btn"
                   onClick={() => {
-                    setDetailModalOpen(false);
-                    navigate(`/patients?id=${selectedInvoice.patient_id}`);
+                    setHistoryPatientId(selectedInvoice.patient_id);
+                    setHistoryModalOpen(true);
                   }}
                   className="px-3 py-2 text-xs font-semibold text-[#525333] bg-[#E8E7E3] hover:bg-[#DCDAD4] border border-[#CAC7BE] rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
                 >
@@ -921,6 +936,13 @@ export const InvoicesPage: React.FC = () => {
         onClose={() => setReceiptOpen(false)}
         savedInvoice={selectedInvoice}
         isReprint={isReprint}
+      />
+
+      {/* In-place Patient History Modal Overlay (preserves Invoices tab state) */}
+      <PatientHistoryModal
+        isOpen={historyModalOpen}
+        onClose={() => setHistoryModalOpen(false)}
+        patientId={historyPatientId}
       />
     </div>
   );

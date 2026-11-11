@@ -7,7 +7,7 @@ from backend.app.schemas.result import (
     ResultEntryRequest,
     ResultResponse,
 )
-from backend.app.schemas.refund import RefundRequestResponse
+from backend.app.schemas.refund import RefundRequestResponse, D15RefundClinicalResponse
 from backend.app.services.result_service import (
     get_result_template,
     save_test_result,
@@ -68,7 +68,7 @@ def get_order_result(
     )
 
 
-@router.post("/{test_order_id}/d15-refund-request", response_model=RefundRequestResponse, status_code=status.HTTP_201_CREATED, summary="Lab Tech submits D15 refund request for rejected/spoiled specimen")
+@router.post("/{test_order_id}/d15-refund-request", response_model=D15RefundClinicalResponse, status_code=status.HTTP_201_CREATED, summary="Lab Tech submits D15 refund request for rejected/spoiled specimen")
 def submit_d15_refund_request(
     test_order_id: int,
     notes: str = "",
@@ -85,5 +85,22 @@ def submit_d15_refund_request(
     )
     db.commit()
     db.refresh(req)
-    return to_refund_response(req)
+    inv = req.invoice
+    line = req.invoice_line
+    staff = req.requested_by
+    return D15RefundClinicalResponse(
+        id=req.id,
+        test_order_id=test_order_id,
+        invoice_id=req.invoice_id,
+        invoice_no=getattr(inv, "invoice_number", None) if inv else None,
+        invoice_line_id=req.invoice_line_id,
+        test_name=getattr(line, "test_name", None) if line else None,
+        reason=req.reason,
+        request_type=req.request_type,
+        status=req.status,
+        requested_by_id=req.requested_by_id,
+        requested_by_name=getattr(staff, "full_name", None) or getattr(staff, "display_name", None) if staff else None,
+        requested_at=req.requested_at,
+        message="D15 refund request submitted for Admin/Owner approval.",
+    )
 

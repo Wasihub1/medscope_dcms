@@ -255,6 +255,13 @@ def save_test_result(
             detail="You can only enter results for your assigned tasks.",
         )
 
+    # Fix 4(a): Reject saving results if order is already COMPLETED (HTTP 409)
+    if order.status == "COMPLETED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot enter or modify results for a completed test order. Completed orders are immutable.",
+        )
+
     if order.status in ("CANCELLED", "REJECTED", "SPOILED"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -262,6 +269,18 @@ def save_test_result(
         )
 
     test = order.invoice_line.test
+
+    # Fix 4(c): For sample-based tests, reject result saving before specimen collection (HTTP 409)
+    is_imaging = test.requires_doctor or test.performing_role == "DOCTOR" or test.report_template == "NARRATIVE"
+    requires_sample = (test.sample_type is not None) or (order.sample_route == "FULL")
+    if requires_sample and not is_imaging:
+        sample = order.sample
+        if not sample or sample.status != "COLLECTED":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Specimen has not been collected yet. Results cannot be entered or saved before sample collection.",
+            )
+
     now_ts = utc_now()
     result_status = "DRAFT" if data.status.upper() == "DRAFT" else "ENTERED"
 
@@ -378,14 +397,18 @@ def save_test_result(
 
     # 4. Update TestOrder operational lifecycle (distinct from Result status)
     if result_status == "ENTERED":
+        # Fix 3 (D19, M12): Culture stage must be FINAL before order can be completed
+        is_culture = (test and test.report_template == "CULTURE_SENSITIVITY") or (order.culture_stage is not None)
         if test.requires_doctor or test.performing_role == "DOCTOR":
             order.status = "AWAITING_DOCTOR"
         elif test.approval_rule == "TECHNICIAN_FINAL":
-            order.status = "COMPLETED"
+            if is_culture and order.culture_stage != "FINAL":
+                order.status = "IN_PROGRESS"
+            else:
+                order.status = "COMPLETED"
         else:
             order.status = "IN_PROGRESS"
-    elif order.status in ("UNASSIGNED", "ASSIGNED", "PENDING", "SAMPLE_PENDING"):
-        order.status = "IN_PROGRESS"
+    # Fix 4(b): Saving a DRAFT does NOT change or advance the TestOrder status
 
     # 5. Append lifecycle history event
     event_action = "RESULT_SAVED_DRAFT" if result_status == "DRAFT" else "RESULT_ENTERED"

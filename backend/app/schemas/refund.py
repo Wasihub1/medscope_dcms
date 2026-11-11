@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, Any
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from backend.app.schemas.common import BaseSchema
 
 
@@ -105,3 +105,25 @@ class RefundRequestResponse(BaseSchema):
         if not self.invoice_number and self.invoice_no:
             self.invoice_number = self.invoice_no
         return self
+
+
+class D15RefundClinicalResponse(BaseModel):
+    """
+    Clinical-only D15 refund response for Laboratory Technicians (Fix 5 / Rule M11.3).
+    Strictly excludes all monetary figures (amount, price, refund value).
+    """
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
+
+    id: int
+    test_order_id: Optional[int] = None
+    invoice_id: int
+    invoice_no: Optional[str] = None
+    invoice_line_id: Optional[int] = None
+    test_name: Optional[str] = None
+    reason: str
+    request_type: str = "D15_NOT_PERFORMED"
+    status: str
+    requested_by_id: int
+    requested_by_name: Optional[str] = None
+    requested_at: datetime
+    message: str = "D15 refund request submitted for Admin/Owner approval."

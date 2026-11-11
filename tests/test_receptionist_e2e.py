@@ -6,32 +6,9 @@ Tests against FastAPI backend at http://127.0.0.1:8000
 
 import pytest
 import httpx
+from tests.conftest import RECEPTIONIST_HEADERS, ADMIN_HEADERS
 
 BASE_URL = "http://127.0.0.1:8000/api/v1"
-
-RECEPTIONIST_HEADERS = {
-    "X-Tenant-Id": "center-seba-01",
-    "X-Staff-Id": "1",
-    "X-Staff-Role": "RECEPTIONIST",
-    "X-Actor-Id": "1",
-    "X-Actor-Role": "RECEPTIONIST",
-    "X-Actor-Name": "Fatima Akter",
-}
-
-ADMIN_HEADERS = {
-    "X-Tenant-Id": "center-seba-01",
-    "X-Staff-Id": "2",
-    "X-Staff-Role": "ADMIN",
-    "X-Actor-Id": "2",
-    "X-Actor-Role": "ADMIN",
-    "X-Actor-Name": "Tariqul Islam",
-}
-
-
-@pytest.fixture(scope="session")
-def client():
-    with httpx.Client(base_url=BASE_URL, timeout=15.0) as c:
-        yield c
 
 
 # ---------------------------------------------------------------------------

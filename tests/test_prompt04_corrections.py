@@ -11,32 +11,9 @@ Validates backend invariants and APIs added/updated in Prompt 04:
 import pytest
 import httpx
 import time
+from tests.conftest import RECEPTIONIST_HEADERS, ADMIN_HEADERS, CASHIER_HEADERS
 
 BASE_URL = "http://127.0.0.1:8000/api/v1"
-
-RECEPTIONIST_HEADERS = {
-    "X-Tenant-Id": "center-seba-01",
-    "X-Staff-Id": "1",
-    "X-Staff-Role": "RECEPTIONIST",
-    "X-Actor-Id": "1",
-    "X-Actor-Role": "RECEPTIONIST",
-    "X-Actor-Name": "Fatima Akter",
-}
-
-ADMIN_HEADERS = {
-    "X-Tenant-Id": "center-seba-01",
-    "X-Staff-Id": "2",
-    "X-Staff-Role": "ADMIN",
-    "X-Actor-Id": "2",
-    "X-Actor-Role": "ADMIN",
-    "X-Actor-Name": "Tariqul Islam",
-}
-
-
-@pytest.fixture(scope="session")
-def client():
-    with httpx.Client(base_url=BASE_URL, timeout=15.0) as c:
-        yield c
 
 
 def test_p04_01_prescriber_and_referrer_separation_and_write_only_commission(client):
@@ -94,7 +71,7 @@ def test_p04_02_business_day_close_rbac(client):
     assert rec_close.status_code == 403, f"Expected 403 Forbidden, got {rec_close.status_code}"
 
     # Cashier close must also be 403 Forbidden
-    cashier_headers = {**RECEPTIONIST_HEADERS, "X-Staff-Role": "CASHIER", "X-Actor-Role": "CASHIER"}
+    cashier_headers = CASHIER_HEADERS
     cashier_close = client.post(
         "/business-day/close",
         headers=cashier_headers,

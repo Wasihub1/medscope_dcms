@@ -1,6 +1,6 @@
 from backend.app.core.database import Base
 from backend.app.models.tenant import Tenant
-from backend.app.models.user import Staff
+from backend.app.models.user import Staff, StaffRole, AuthSession
 from backend.app.models.patient import Patient
 from backend.app.models.visit import Visit
 from backend.app.models.referrer import Referrer
@@ -19,6 +19,8 @@ __all__ = [
     "Base",
     "Tenant",
     "Staff",
+    "StaffRole",
+    "AuthSession",
     "Patient",
     "Visit",
     "Referrer",

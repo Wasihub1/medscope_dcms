@@ -1,4 +1,5 @@
 import sys
+import os
 from logging.config import fileConfig
 from pathlib import Path
 from alembic import context
@@ -21,6 +22,14 @@ target_metadata = Base.metadata
 
 
 def get_url():
+    if os.environ.get("ALEMBIC_DATABASE_URL"):
+        return os.environ["ALEMBIC_DATABASE_URL"]
+    x_args = context.get_x_argument(as_dictionary=True)
+    if "db_url" in x_args and x_args["db_url"]:
+        return x_args["db_url"]
+    main_opt = config.get_main_option("sqlalchemy.url")
+    if main_opt:
+        return main_opt
     return settings.DATABASE_URL
 
 

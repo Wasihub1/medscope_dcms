@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Boolean, DateTime, Integer, Float, ForeignKey, Index, Text, JSON
+from sqlalchemy import String, Boolean, DateTime, Integer, Float, ForeignKey, Index, Text, JSON, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.app.core.database import Base
 from backend.app.core.timezone import utc_now
@@ -15,7 +15,7 @@ class Result(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    test_order_id: Mapped[int] = mapped_column(Integer, ForeignKey("test_orders.id"), nullable=False, unique=True, index=True)
+    test_order_id: Mapped[int] = mapped_column(Integer, ForeignKey("test_orders.id"), nullable=False, index=True)
 
     result_type: Mapped[str] = mapped_column(String(50), default="NUMERIC_TABLE", nullable=False)
     # NUMERIC_TABLE, NARRATIVE, ULTRASOUND, CULTURE_SENSITIVITY
@@ -37,6 +37,7 @@ class Result(Base):
     items: Mapped[list["ResultItem"]] = relationship("ResultItem", back_populates="result", cascade="all, delete-orphan", order_by="ResultItem.sort_order")
 
     __table_args__ = (
+        UniqueConstraint("test_order_id", name="uq_results_test_order_id"),
         Index("idx_result_tenant_order", "tenant_id", "test_order_id"),
     )
 
@@ -52,7 +53,7 @@ class ResultItem(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    result_id: Mapped[int] = mapped_column(Integer, ForeignKey("results.id"), nullable=False, index=True)
+    result_id: Mapped[int] = mapped_column(Integer, ForeignKey("results.id", ondelete="CASCADE"), nullable=False, index=True)
     test_component_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("test_components.id"), nullable=True)
 
     component_name: Mapped[str] = mapped_column(String(200), nullable=False)

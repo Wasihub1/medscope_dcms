@@ -4,18 +4,19 @@
 
 The MedScope backend provides a RESTful JSON API rooted at `/api/v1`. All monetary values are serialized as whole Bangladeshi Taka integers (`int`).
 
-### Authentication & Actor Context Headers
-Every request must include the following stateless actor context headers:
-```http
-X-Tenant-Id: center-seba-01
-X-Staff-Id: 1
-X-Staff-Role: RECEPTIONIST
-X-Actor-Name: Fatima Akter
-```
-*(Accepted aliases: `X-Actor-Id` for `X-Staff-Id`, `X-Actor-Role` for `X-Staff-Role`).*
+### Endpoint & Operation Registration Count
+- **Unique Paths:** 69 paths registered in FastAPI OpenAPI schema (`len(app.openapi()['paths']) == 69`).
+- **Total Operations:** 79 HTTP operations across 15 modules.
+- **Prompt 10 Review:** Pure client-side UI/UX implementation; zero backend endpoint modifications or additions.
+- **Convenience & Legacy Aliases:** Includes 10 duplicate/convenience alias operations preserved for frontend and client backward compatibility (e.g., `/refunds/review/{id}` and `/refunds/{id}/review`, `/refunds/disburse/{id}` and `/refunds/{id}/disburse`, `/worklist/{id}/result-template` and `/worklist/{id}/result` GET alias).
 
-> [!NOTE] Development Security Limitation
-> These headers provide development identity emulation for testing Receptionist vs. Admin workflows. Production deployment replaces this mechanism with cryptographic session cookies and role authorization.
+### Authentication & Stateful Session Transport (Prompt 09)
+Stateless header-based identity switching (`X-Staff-Id`, `X-Staff-Role`) has been permanently decommissioned. All requests must present a verified server-side session token:
+- **Browser/UI Transport:** Stateful `HttpOnly`, `SameSite=Lax`, `Path=/` cookie named `medscope_session`.
+- **API/CLI Client Transport:** `Authorization: Bearer <session-token>` header.
+- **CSRF Defense:** Mutating requests (`POST`, `PUT`, `DELETE`, `PATCH`) require the `X-Requested-With: XMLHttpRequest` header.
+- **Session Lifecycle:** 120-minute idle sliding window (`SESSION_IDLE_TIMEOUT_MINUTES=120`), 24-hour absolute maximum lifetime (`SESSION_ABSOLUTE_LIFETIME_HOURS=24`).
+- **Password Security:** Argon2id hashing (`argon2-cffi`), 5 consecutive failed attempts lockout (`AUTH_MAX_FAILED_ATTEMPTS=5`), and generic authentication error messages.
 
 ---
 
@@ -93,8 +94,8 @@ X-Actor-Name: Fatima Akter
 | :--- | :--- | :--- | :--- | :--- |
 | `GET` | `/refunds` | List pre-sample and D15 refund requests with joined patient and invoice metadata. | All | 200 |
 | `POST` | `/refunds` | Submit pre-sample cancellation refund request; verifies sample has not been collected and line is not locked. | All | 201, 400 |
-| `POST` | `/refunds/review/{id}` | Approve or reject refund request (Admin/Owner). Approval moves request to `APPROVED` and invoice to `REFUND_APPROVED`. Does NOT prematurely record payout. | **Admin, Owner** | 200, **403 (Receptionist, Cashier)** |
-| `POST` | `/refunds/disburse/{id}` | Disburse approved refund to patient via specified payment channel (`CASH`, `BKASH`, `NAGAD`, `ROCKET`, `CARD`, `BANK_TRANSFER`) with transaction reference; moves request to `COMPLETED`, invoice to `FULLY_REFUNDED`/`PARTIALLY_REFUNDED`, records disburser, updates drawer ledger, and reverses commission. | **Cashier, Receptionist, Admin, Owner** | 200, 400, 404 |
+| `POST` | `/refunds/review/{id}` *(alias: `/refunds/{id}/review`)* | Approve or reject refund request (Admin/Owner). Enforces segregation of duties (`reviewer_id != requested_by_id`, 403 on violation). Approval moves request to `APPROVED` and invoice to `REFUND_APPROVED`. Does NOT prematurely record payout. | **Admin, Owner** | 200, **403 (Self-approval or Receptionist/Cashier)** |
+| `POST` | `/refunds/disburse/{id}` *(alias: `/refunds/{id}/disburse`)* | Disburse approved refund to patient. Strictly enforces original payment channel validation, mandatory reference for non-cash, and per-channel balance capping; moves request to `COMPLETED`, invoice to `FULLY_REFUNDED`/`PARTIALLY_REFUNDED`, records disburser, updates drawer ledger, and reverses commission. | **Cashier, Receptionist, Admin, Owner** | 200, 400, 404 |
 
 ### 2.11 Reports & Deliveries (`/api/v1/reports`)
 | Method | Path | Summary | Roles | Status Codes |
@@ -124,14 +125,25 @@ X-Actor-Name: Fatima Akter
 | `POST` | `/worklist/{id}/reject-sample` | Record spoiled or rejected specimen (Section 5.3 & D15 rule). Requires mandatory rejection reason. Marks task as `REJECTED` or `SPOILED`, preserves invoice line lock, logs `SAMPLE_REJECTED` lifecycle event, and flags patient for contact follow-up. | **Lab Tech, Admin, Owner** | 200, 400, 403, 404 |
 | `POST` | `/worklist/{id}/patient-contact` | Record patient call follow-up for spoiled/rejected specimen (`CALLED`, `RECOLLECTION_AGREED`, `REFUND_REQUESTED`). Enforces that recollection requires a new bill line; no free re-runs. | **Lab Tech, Admin, Owner** | 200, 400, 403, 404 |
 | `POST` | `/worklist/{id}/imaging-performed` | Record radiology/imaging examination performed. Locks line for doctor interpretation and transitions order to `AWAITING_DOCTOR`. | **Lab Tech, Admin, Owner** | 200, 400, 403, 404 |
-| `POST` | `/worklist/{id}/culture-stage` | Progress culture test through multi-day stages (`INCUBATING`, `PRELIMINARY`, `FINAL`). Preserves timestamps and actor attribution in lifecycle history. | **Lab Tech, Admin, Owner** | 200, 400, 403, 404 |
+| `POST` | `/worklist/{id}/culture-stage` | Progress culture test through multi-day stages (`INCUBATING`, `PRELIMINARY`, `FINAL`). Moving to `FINAL` decouples from order status (order remains `IN_PROGRESS`). Preserves timestamps and actor attribution in lifecycle history. | **Lab Tech, Admin, Owner** | 200, 400, 403, 404 |
 | `POST` | `/worklist/{id}/outsourced` | Record outside referral laboratory dispatch (`SENT`) or specimen receipt (`RECEIVED`) with tracking/reference number. | **Lab Tech, Admin, Owner** | 200, 400, 403, 404 |
-| `GET` | `/worklist/{id}/events` | Retrieve full append-only operational lifecycle history and event timeline for a laboratory order. | **Lab Tech, Admin, Owner** | 200, 403, 404 |
+| `GET` | `/worklist/{id}/events` | Retrieve full append-only operational lifecycle history and event timeline for a laboratory order. Monetary amounts (`Tk`, `৳`) are dynamically redacted for `LAB_TECH` callers. | **Lab Tech, Admin, Owner** | 200, 403, 404 |
 | `GET` | `/worklist/{id}/barcode` | Generate Code 128 vector SVG barcode label payload for specimen tubes (50mm x 25mm / 50mm x 30mm thermal label printers). Strictly financial-free. | **Lab Tech, Admin, Owner** | 200, 403, 404 |
-| `POST` | `/worklist/{id}/status` | Updates order lifecycle status. Enforces Prompt 06 transition invariants: sample-based tasks cannot complete before specimen collection; doctor-required tests require physician authorization; rejected/spoiled tasks cannot complete. | **Lab Tech, Admin, Owner** | 200, 400, 403, 404 |
-| `GET` | `/worklist/{id}/result-template` | Retrieve result entry template, test component definitions with reference ranges, critical and impossible bounds, and current draft/entered results. | **Lab Tech, Admin, Owner** | 200, 404 |
-| `POST` | `/worklist/{id}/result` | Save clinical result (draft or entered). Enforces impossible-limit validation (HTTP 400 rejection), automatic flag calculations (`LOW`, `HIGH`, `CRITICAL`, `NORMAL`, `None`), and permanent reference range snapshotting (D24). Decouples result status from order status. | **Lab Tech, Admin, Owner** | 200, 400, 403, 404 |
-| `POST` | `/worklist/{id}/d15-refund-request` | Submit D15 Not Performed refund request for spoiled or rejected specimen. Queues request to Admin under `PENDING_ADMIN_APPROVAL` with `request_type="D15_NOT_PERFORMED"`. | **Lab Tech, Admin, Owner** | 200, 400, 403, 404 |
+| `POST` | `/worklist/{id}/status` | Updates order lifecycle status. Enforces transition invariants: sample-based tasks cannot complete before specimen collection; culture tests require `culture_stage == "FINAL"` before completion; doctor-required tests require physician authorization; rejected/spoiled tasks cannot complete. | **Lab Tech, Admin, Owner** | 200, 400, 403, 404 |
+| `GET` | `/worklist/{id}/result-template` *(alias: `/worklist/{id}/result`)* | Retrieve result entry template, test component definitions with reference ranges, critical and impossible bounds, and current draft/entered results. | **Lab Tech, Admin, Owner** | 200, 404 |
+| `POST` | `/worklist/{id}/result` | Save clinical result (draft or entered). Enforces impossible-limit validation (HTTP 400 rejection), completed order immutability (HTTP 409 Conflict), specimen collection prerequisite (HTTP 409 Conflict), automatic flag calculations (`LOW`, `HIGH`, `CRITICAL`, `NORMAL`, `None`), and permanent reference range snapshotting (D24). Saving `DRAFT` preserves order status. | **Lab Tech, Admin, Owner** | 200, 400, 403, 404, **409** |
+| `POST` | `/worklist/{id}/d15-refund-request` | Submit D15 Not Performed refund request for spoiled or rejected specimen. Queues request to Admin under `PENDING_ADMIN_APPROVAL` with `request_type="D15_NOT_PERFORMED"`. Returns clinical response `D15RefundClinicalResponse` strictly omitting all monetary amounts. | **Lab Tech, Admin, Owner** | 201, 400, 403, 404 |
+
+### 2.14 Authentication & Session Management (`/api/v1/auth`) — Prompt 09
+| Method | Path | Summary | Roles | Status Codes |
+| :--- | :--- | :--- | :--- | :--- |
+| `POST` | `/auth/login` | Authenticate user with username and password. On success, issues `medscope_session` HttpOnly cookie or bearer token, resets failed attempts, and returns user profile with active business day. | Public | 200, 400, 401, 423 |
+| `POST` | `/auth/logout` | Revoke active session on server side, clearing cookie and marking session revoked in database. | Authenticated | 200 |
+| `GET` | `/auth/me` | Retrieve current authenticated staff profile, assigned roles, acting role, and active business day. Automatically slides idle expiration. | Authenticated | 200, 401 |
+| `POST` | `/auth/acting-role` | Switch current acting role for multi-role staff. Updates session acting role; returns updated profile. | Authenticated | 200, 400, 401, 403 |
+| `POST` | `/auth/change-password` | Self-service password change. Validates old password, enforces 8+ character complexity, hashes via Argon2id, and revokes all active sessions. | Authenticated | 200, 400, 401 |
+| `POST` | `/auth/users/{user_id}/reset-password` | Administrative password reset for staff member. Hashes new password, resets lockout counters, and revokes all staff sessions. | **Admin, Owner** | 200, 400, 401, 403, 404 |
+| `POST` | `/auth/users/{user_id}/unlock` | Administratively unlock a locked staff account, resetting failed attempts counter to 0 and clearing lock timestamp. | **Admin, Owner** | 200, 401, 403, 404 |
 
 ---
 

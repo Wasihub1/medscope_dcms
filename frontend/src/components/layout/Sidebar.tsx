@@ -28,7 +28,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleCollapse })
   const location = useLocation();
 
   const navItems = [
-    { label: 'Dashboard', path: '/', icon: LayoutDashboard },
+    { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
     { label: 'My Work (Lab)', path: '/worklist', icon: FlaskConical, highlight: role === 'LAB_TECH' },
     { label: 'New Invoice', path: '/invoices/new', icon: PlusCircle, highlight: role !== 'LAB_TECH' },
     { label: 'Invoices', path: '/invoices', icon: Receipt },
@@ -59,7 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleCollapse })
                 MedScope DCMS
               </span>
               <span className="text-[11px] text-[#C2C6A4] block truncate">
-                {role === 'ADMIN' ? 'Admin Mode (Testing)' : role === 'LAB_TECH' ? 'Laboratory Workbench' : 'Receptionist Portal'}
+                {role === 'ADMIN' || role === 'OWNER' ? 'Administration Portal' : role === 'LAB_TECH' ? 'Laboratory Workbench' : 'Receptionist Portal'}
               </span>
             </div>
           )}

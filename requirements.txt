@@ -34,6 +34,7 @@
 fastapi>=0.110.0,<1.0.0          # High-performance async REST API framework
 uvicorn[standard]>=0.28.0,<1.0.0 # Production ASGI server with uvloop and websockets
 python-multipart>=0.0.9          # Form-data and multipart request parsing for FastAPI
+argon2-cffi>=23.1.0              # Cryptographic Argon2id password hashing (Prompt 09)
 
 # ------------------------------------------------------------------------------
 # 2. DATA VALIDATION & CONFIGURATION (Python)

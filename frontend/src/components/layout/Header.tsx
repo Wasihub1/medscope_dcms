@@ -10,16 +10,19 @@ import {
   X,
   FlaskConical,
   Droplet,
-  UserCheck,
   Shield,
+  LogOut,
+  ChevronDown,
+  Check,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Badge } from '../common/Badge';
 import { api } from '../../api/client';
-import { GlobalSearchResult } from '../../types';
+import { GlobalSearchResult, Role } from '../../types';
+import { getRoleHomeRoute } from '../../utils/navigation';
 
 export const Header: React.FC = () => {
-  const { role, actorMode, staffName, department, businessDay, toggleRole } = useAuth();
+  const { user, role, staffName, department, businessDay, logout, switchRole } = useAuth();
   const navigate = useNavigate();
 
   // Inline Search State
@@ -29,8 +32,12 @@ export const Header: React.FC = () => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
+  // User profile dropdown menu state
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
   // Debounced Search Query
   useEffect(() => {
@@ -57,11 +64,14 @@ export const Header: React.FC = () => {
     return () => clearTimeout(timer);
   }, [query]);
 
-  // Click outside to close dropdown
+  // Click outside to close dropdowns
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setDropdownOpen(false);
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -105,6 +115,23 @@ export const Header: React.FC = () => {
     }
   };
 
+  const handleSignOut = async () => {
+    setUserMenuOpen(false);
+    await logout();
+    navigate('/login', { replace: true });
+  };
+
+  const handleRoleSwitch = async (newRole: Role) => {
+    if (newRole === role) return;
+    try {
+      await switchRole(newRole);
+      setUserMenuOpen(false);
+      navigate(getRoleHomeRoute(newRole));
+    } catch (err: unknown) {
+      console.error('Failed to switch acting role:', err);
+    }
+  };
+
   const getCategoryIcon = (category: string) => {
     switch (category) {
       case 'PATIENT':
@@ -112,90 +139,103 @@ export const Header: React.FC = () => {
       case 'INVOICE':
         return <FileText className="w-4 h-4 text-[#CF8852]" />;
       case 'REPORT':
-        return <Activity className="w-4 h-4 text-emerald-600" />;
+        return <Activity className="w-4 h-4 text-[#525333]" />;
       case 'TEST':
-        return <FlaskConical className="w-4 h-4 text-indigo-600" />;
+        return <FlaskConical className="w-4 h-4 text-[#CF8852]" />;
       case 'SAMPLE':
-        return <Droplet className="w-4 h-4 text-rose-600" />;
+        return <Droplet className="w-4 h-4 text-[#B91C1C]" />;
       default:
-        return <Search className="w-4 h-4 text-[#8E8A7E]" />;
+        return <Search className="w-4 h-4 text-[#6D6A60]" />;
     }
   };
 
-  // Group results by category
+  // Group search results by category
   const categories = ['PATIENT', 'INVOICE', 'REPORT', 'TEST', 'SAMPLE'] as const;
-  const categoryLabels = {
-    PATIENT: 'Patients',
-    INVOICE: 'Invoices & Bills',
-    REPORT: 'Diagnostic Reports',
-    TEST: 'Tests Catalog',
-    SAMPLE: 'Specimens',
-  };
+  const groupedResults = categories.reduce((acc, cat) => {
+    const matches = results.filter((r) => r.category === cat);
+    if (matches.length > 0) acc[cat] = matches;
+    return acc;
+  }, {} as Record<string, GlobalSearchResult[]>);
+
+  let flatIndexCounter = 0;
+
+  // Initials for avatar
+  const initials = staffName
+    ? staffName
+        .split(' ')
+        .map((p) => p[0])
+        .filter(Boolean)
+        .slice(0, 2)
+        .join('')
+        .toUpperCase()
+    : 'MS';
 
   return (
-    <header className="h-16 bg-[#FAF9F6] border-b border-[#DCDAD4] px-6 flex items-center justify-between shrink-0 shadow-2xs z-30">
-      {/* Left: Inline Global Search Bar with Anchored Dropdown (Item 08 & 09) */}
-      <div ref={containerRef} className="relative flex-1 max-w-md">
-        <div className="flex items-center gap-2 px-3.5 py-1.5 bg-[#F4F3F0] focus-within:bg-white text-[#1B1B0E] rounded-xl border border-[#CAC7BE] focus-within:border-[#CF8852] focus-within:ring-1 focus-within:ring-[#CF8852] transition-all shadow-2xs">
-          <Search className="w-4 h-4 text-[#8E8A7E] shrink-0" />
+    <header className="h-16 border-b border-[#DCDAD4] bg-[#F4F3F0] px-4 sm:px-6 flex items-center justify-between gap-4 sticky top-0 z-30">
+      {/* Left / Center: Global Search Bar */}
+      <div ref={containerRef} className="relative flex-1 max-w-xl">
+        <div className="relative flex items-center">
+          <Search className="w-4 h-4 absolute left-3.5 text-[#8E8A7E] pointer-events-none" />
           <input
-            id="medscope-global-search"
             ref={inputRef}
             type="text"
-            data-testid="global-search-input"
+            role="combobox"
+            aria-expanded={dropdownOpen}
+            aria-autocomplete="list"
+            aria-controls="global-search-results"
+            id="medscope-global-search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => {
               if (results.length > 0) setDropdownOpen(true);
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Search patients, invoices, tests, reports..."
-            className="w-full text-xs bg-transparent border-none outline-none text-[#1B1B0E] placeholder:text-[#8E8A7E]"
+            placeholder="Search patients, invoices, reports, tests (Ctrl+F)..."
+            className="w-full pl-10 pr-10 py-2 text-xs sm:text-sm bg-white border border-[#DCDAD4] rounded-2xl text-[#1B1B0E] placeholder-[#8E8A7E] focus:outline-none focus:ring-2 focus:ring-[#CF8852] focus:border-transparent transition-all shadow-2xs"
           />
           {loading ? (
-            <Loader2 className="w-3.5 h-3.5 text-[#CF8852] animate-spin shrink-0" />
+            <div className="absolute right-3">
+              <Loader2 className="w-4 h-4 text-[#CF8852] animate-spin" />
+            </div>
           ) : query ? (
             <button
-              type="button"
               onClick={() => {
                 setQuery('');
                 setResults([]);
                 setDropdownOpen(false);
               }}
-              className="p-0.5 text-[#8E8A7E] hover:text-[#1B1B0E] rounded transition-colors"
+              className="absolute right-3 p-0.5 text-[#8E8A7E] hover:text-[#1B1B0E] rounded-full hover:bg-[#E8E7E3]"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           ) : (
-            <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono text-[#8E8A7E] bg-white rounded border border-[#CAC7BE] shrink-0">
-              Ctrl + F
+            <kbd className="hidden sm:inline-block absolute right-3 px-1.5 py-0.5 text-[10px] font-semibold text-[#8E8A7E] bg-[#F4F3F0] border border-[#DCDAD4] rounded">
+              Ctrl+F
             </kbd>
           )}
         </div>
 
-        {/* Anchored Autocomplete Results Dropdown */}
+        {/* Global Search Results Dropdown */}
         {dropdownOpen && (
           <div
-            data-testid="global-search-dropdown"
-            className="absolute top-full left-0 w-full mt-1.5 bg-[#FAF9F6] border border-[#DCDAD4] rounded-2xl shadow-2xl max-h-[70vh] overflow-y-auto z-50 p-2 space-y-3 animate-in fade-in zoom-in-98 duration-100"
+            id="global-search-results"
+            role="listbox"
+            className="absolute left-0 right-0 top-full mt-2 bg-white border border-[#DCDAD4] rounded-2xl shadow-xl overflow-hidden z-50 max-h-[75vh] overflow-y-auto"
           >
             {results.length === 0 ? (
-              <div className="p-6 text-center text-xs text-[#8E8A7E]">
-                No diagnostic records match &quot;{query}&quot;
+              <div className="p-4 text-center text-xs text-[#8E8A7E]">
+                No matching records found for "{query}"
               </div>
             ) : (
-              categories.map((cat) => {
-                const catResults = results.filter((r) => r.category === cat);
-                if (catResults.length === 0) return null;
-
+              Object.entries(groupedResults).map(([category, items]) => {
                 return (
-                  <div key={cat} className="space-y-1">
-                    <span className="text-[10px] font-bold text-[#6D6A60] uppercase tracking-wider px-2 block">
-                      {categoryLabels[cat]} ({catResults.length})
-                    </span>
-                    <div className="space-y-0.5">
-                      {catResults.map((item) => {
-                        const globalIndex = results.indexOf(item);
+                  <div key={category} className="border-b border-[#F4F3F0] last:border-b-0">
+                    <div className="px-3.5 py-1.5 bg-[#FAF9F7] text-[10px] font-bold tracking-wider text-[#6D6A60] uppercase">
+                      {category}s ({items.length})
+                    </div>
+                    <div className="p-1 space-y-0.5">
+                      {items.map((item) => {
+                        const globalIndex = flatIndexCounter++;
                         const isSelected = globalIndex === selectedIndex;
                         return (
                           <div
@@ -203,8 +243,9 @@ export const Header: React.FC = () => {
                             data-testid={`search-result-${item.category.toLowerCase()}-${item.id}`}
                             onClick={() => handleSelectResult(item)}
                             onMouseEnter={() => setSelectedIndex(globalIndex)}
-                            className={`flex items-center justify-between p-2 rounded-xl text-xs cursor-pointer transition-colors ${isSelected ? 'bg-[#E8E7E3] text-[#1B1B0E]' : 'hover:bg-[#F4F3F0] text-[#54524A]'
-                              }`}
+                            className={`flex items-center justify-between p-2 rounded-xl text-xs cursor-pointer transition-colors ${
+                              isSelected ? 'bg-[#E8E7E3] text-[#1B1B0E]' : 'hover:bg-[#F4F3F0] text-[#54524A]'
+                            }`}
                           >
                             <div className="flex items-center gap-2.5 min-w-0">
                               <div className="p-1.5 rounded-lg bg-white border border-[#DCDAD4] shrink-0">
@@ -236,7 +277,7 @@ export const Header: React.FC = () => {
         )}
       </div>
 
-      {/* Right: Status Pills & Role Switcher */}
+      {/* Right: Business Day Status & Authenticated User Menu */}
       <div className="flex items-center gap-2 sm:gap-4 shrink-0">
         {/* Business Day Status */}
         <div className="hidden sm:flex items-center gap-2">
@@ -254,62 +295,93 @@ export const Header: React.FC = () => {
         {/* Vertical divider */}
         <div className="h-6 w-px bg-[#DCDAD4]" />
 
-        {/* Role Switcher (For Multi-Role Testing: Receptionist <-> Admin <-> Lab Techs) */}
-        <button
-          onClick={toggleRole}
-          data-testid="role-switcher-button"
-          title="Click to cycle between Receptionist, Admin, Tech Kamal (Hematology), and Tech Nasrin (Biochemistry)"
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer shadow-2xs ${
-            role === 'ADMIN'
-              ? 'bg-[#FAF3EC] border-[#CF8852] text-[#96572A] hover:bg-[#F3E4D6]'
-              : role === 'LAB_TECH'
-              ? 'bg-[#EEF2F6] border-[#4F6B8A] text-[#1E3A5F] hover:bg-[#DEE7F0]'
-              : 'bg-[#F2F3EC] border-[#9FA574] text-[#444529] hover:bg-[#E2E4D4]'
-          }`}
-        >
-          {role === 'ADMIN' ? (
-            <>
-              <Shield className="w-4 h-4 text-[#CF8852]" />
-              <span>Admin Mode</span>
-            </>
-          ) : actorMode === 'LAB_TECH_KAMAL' ? (
-            <>
-              <FlaskConical className="w-4 h-4 text-[#2B547E]" />
-              <span>Tech: Kamal (Hema)</span>
-            </>
-          ) : actorMode === 'LAB_TECH_NASRIN' ? (
-            <>
-              <FlaskConical className="w-4 h-4 text-[#2B547E]" />
-              <span>Tech: Nasrin (Biochem)</span>
-            </>
-          ) : (
-            <>
-              <UserCheck className="w-4 h-4 text-[#525333]" />
-              <span>Receptionist Mode</span>
-            </>
-          )}
-          <span className="text-[10px] font-normal underline opacity-80">(Switch)</span>
-        </button>
+        {/* Authenticated Staff User Menu (Prompt 09) */}
+        <div ref={userMenuRef} className="relative">
+          <button
+            onClick={() => setUserMenuOpen(!userMenuOpen)}
+            data-testid="header-user-menu-btn"
+            className="flex items-center gap-2.5 p-1 sm:px-2 sm:py-1.5 rounded-xl hover:bg-[#E8E7E3] transition-colors cursor-pointer text-left"
+          >
+            <div
+              className={`w-9 h-9 rounded-full text-white flex items-center justify-center font-bold text-xs shadow-xs border shrink-0 ${
+                role === 'ADMIN' || role === 'OWNER'
+                  ? 'bg-[#CF8852] border-[#A85F2C]'
+                  : role === 'LAB_TECH'
+                  ? 'bg-[#2B547E] border-[#1C3B5E]'
+                  : 'bg-[#525333] border-[#373720]'
+              }`}
+            >
+              {initials}
+            </div>
+            <div className="hidden md:block">
+              <span className="text-xs font-semibold text-[#1B1B0E] block leading-tight">
+                {staffName.split(' ')[0]} {staffName.split(' ')[1] || ''}
+              </span>
+              <span className="text-[10px] text-[#6D6A60] block leading-tight">
+                {role} • {department}
+              </span>
+            </div>
+            <ChevronDown className="w-3.5 h-3.5 text-[#8E8A7E] hidden md:block" />
+          </button>
 
-        {/* Staff Identity */}
-        <div className="flex items-center gap-3 pl-1">
-          <div className={`w-9 h-9 rounded-full text-white flex items-center justify-center font-bold text-xs shadow-xs border ${
-            role === 'ADMIN'
-              ? 'bg-[#CF8852] border-[#A85F2C]'
-              : role === 'LAB_TECH'
-              ? 'bg-[#2B547E] border-[#1C3B5E]'
-              : 'bg-[#525333] border-[#373720]'
-          }`}>
-            {role === 'ADMIN' ? 'TI' : actorMode === 'LAB_TECH_KAMAL' ? 'KH' : actorMode === 'LAB_TECH_NASRIN' ? 'NS' : 'FA'}
-          </div>
-          <div className="hidden md:block text-left">
-            <span className="text-xs font-semibold text-[#1B1B0E] block leading-tight">
-              {staffName.split(' ')[0]} {staffName.split(' ')[1] || ''}
-            </span>
-            <span className="text-[10px] text-[#6D6A60] block leading-tight">
-              {department}
-            </span>
-          </div>
+          {/* User Menu Dropdown */}
+          {userMenuOpen && (
+            <div
+              data-testid="header-user-dropdown"
+              className="absolute right-0 top-full mt-2 w-64 bg-white border border-[#DCDAD4] rounded-2xl shadow-xl overflow-hidden z-50 p-2 text-xs"
+            >
+              {/* Profile Header */}
+              <div className="p-2.5 bg-[#FAF9F7] rounded-xl border border-[#F0EFEA] mb-2">
+                <span className="font-bold text-sm text-[#1B1B0E] block truncate">{staffName}</span>
+                <span className="text-[#6D6A60] text-[11px] block">@{user?.username}</span>
+                <div className="mt-2 flex items-center gap-1.5">
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#E8E7E3] text-[#525333] border border-[#DCDAD4]">
+                    Acting: {role}
+                  </span>
+                  <span className="text-[10px] text-[#8E8A7E] truncate">{department}</span>
+                </div>
+              </div>
+
+              {/* Role Switcher if user holds multiple roles */}
+              {user?.roles && user.roles.length > 1 && (
+                <div className="mb-2 pb-2 border-b border-[#F0EFEA]">
+                  <span className="px-2 py-1 text-[10px] font-bold text-[#8E8A7E] uppercase tracking-wider block">
+                    Switch Acting Role
+                  </span>
+                  <div className="space-y-0.5 mt-1">
+                    {user.roles.map((r) => {
+                      const isActive = r === role;
+                      return (
+                        <button
+                          key={r}
+                          onClick={() => handleRoleSwitch(r)}
+                          data-testid={`switch-role-${r.toLowerCase()}`}
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
+                            isActive
+                              ? 'bg-[#E8E7E3] text-[#1B1B0E] font-semibold'
+                              : 'hover:bg-[#F4F3F0] text-[#54524A]'
+                          }`}
+                        >
+                          <span>{r}</span>
+                          {isActive && <Check className="w-3.5 h-3.5 text-[#525333]" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Sign Out Action */}
+              <button
+                onClick={handleSignOut}
+                data-testid="sign-out-btn"
+                className="w-full flex items-center gap-2 px-2.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+              >
+                <LogOut className="w-4 h-4 text-rose-600" />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>

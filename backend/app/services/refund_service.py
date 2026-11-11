@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict
 from fastapi import HTTPException, status
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
@@ -8,8 +8,40 @@ from backend.app.models.invoice import Invoice, InvoiceLine
 from backend.app.models.test_order import TestOrder, TestOrderEvent
 from backend.app.models.sample import Sample
 from backend.app.models.refund import RefundRequest
+from backend.app.models.business_day import BusinessDay, BusinessDayChannelBalance
 from backend.app.schemas.refund import RefundEligibilityResponse, RefundRequestCreate, RefundDisbursementRequest
 from backend.app.services.audit_service import log_audit_event
+
+
+def enforce_segregation_of_duties(
+    db: Session,
+    tenant_id: str,
+    reviewer_id: int,
+    requested_by_id: int,
+    request_id: int,
+    acting_role: str,
+) -> None:
+    """
+    D56 Segregation of Duties Invariant:
+    A staff member cannot approve or review their own refund request.
+    Isolated in this single helper function for future per-tenant configurability (Small Center Mode).
+    """
+    if reviewer_id == requested_by_id:
+        log_audit_event(
+            db=db,
+            tenant_id=tenant_id,
+            action="REFUND_SELF_APPROVAL_BLOCKED",
+            entity_type="REFUND_REQUEST",
+            entity_id=request_id,
+            acting_role=acting_role,
+            actor_id=reviewer_id,
+            before_value=f"Requester ID: {requested_by_id}",
+            after_value=f"Blocked self-review attempt by user {reviewer_id}",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Segregation of duties violation: You cannot approve or reject a refund request that you submitted yourself.",
+        )
 
 
 def check_refund_eligibility(
@@ -178,13 +210,13 @@ def initiate_d15_refund_request(
     if line.invoice and line.invoice.refund_status not in ("PARTIALLY_REFUNDED", "FULLY_REFUNDED"):
         line.invoice.refund_status = "REFUND_PENDING"
 
-    # Append lifecycle event
+    # Append lifecycle event (clinical-only description for technician financial isolation)
     lifecycle_event = TestOrderEvent(
         tenant_id=tenant_id,
         test_order_id=order.id,
         event_type="D15_REFUND_REQUESTED",
         stage=order.status,
-        description=f"D15 Refund Request submitted for Admin/Owner approval: Tk {line.net_price}",
+        description="D15 Refund Request submitted for Admin/Owner approval.",
         notes=notes,
         actor_id=requested_by_id,
         actor_role=acting_role,
@@ -353,6 +385,16 @@ def admin_review_refund_request(
             detail=f"Refund request is already in '{req.status}' state.",
         )
 
+    # Fix 2: Enforce Segregation of Duties (D56)
+    enforce_segregation_of_duties(
+        db=db,
+        tenant_id=tenant_id,
+        reviewer_id=reviewer_id,
+        requested_by_id=req.requested_by_id,
+        request_id=req.id,
+        acting_role=acting_role,
+    )
+
     action_norm = action.strip().upper() if action else ""
     now_ts = utc_now()
     req.reviewed_by_id = reviewer_id
@@ -380,14 +422,14 @@ def admin_review_refund_request(
         # Section 5 Fix 4: Set to REFUND_APPROVED (Awaiting Disbursement), not FULLY_REFUNDED!
         invoice.refund_status = "REFUND_APPROVED"
 
-        # Append lifecycle event if test order exists
+        # Append lifecycle event if test order exists (amount-free description for technician isolation)
         if line.test_order:
             ev = TestOrderEvent(
                 tenant_id=tenant_id,
                 test_order_id=line.test_order.id,
                 event_type="REFUND_APPROVED",
                 stage="REFUND_APPROVED",
-                description=f"Refund request for Tk {req.amount} approved by Admin. Awaiting disbursement.",
+                description="Refund request approved by Admin. Awaiting disbursement.",
                 notes=review_notes,
                 actor_id=reviewer_id,
                 actor_role=acting_role,
@@ -438,7 +480,7 @@ def admin_review_refund_request(
                 test_order_id=line.test_order.id,
                 event_type="REFUND_REJECTED",
                 stage=line.test_order.status,
-                description=f"Refund request for Tk {req.amount} rejected by Admin. Reason: {review_notes or 'No reason provided'}",
+                description=f"Refund request rejected by Admin. Reason: {review_notes or 'No reason provided'}",
                 notes=review_notes,
                 actor_id=reviewer_id,
                 actor_role=acting_role,
@@ -489,13 +531,73 @@ def disburse_refund(
         )
 
     now_ts = utc_now()
+    invoice = req.invoice
+    method_norm = data.method.strip().upper() if data.method else "CASH"
+
+    # Fix 1: Validate disbursement method against invoice recorded payments (D18, M29)
+    paid_channels: Dict[str, int] = {}
+    for p in invoice.payments:
+        pm = p.method.strip().upper()
+        paid_channels[pm] = paid_channels.get(pm, 0) + p.amount
+
+    if not paid_channels:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot disburse refund: No payments have been recorded for this invoice.",
+        )
+
+    if method_norm not in paid_channels:
+        valid_methods_str = ", ".join(sorted(paid_channels.keys()))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid disbursement channel '{method_norm}'. Refunds must use the original payment channel. Recorded payment channels: {valid_methods_str}.",
+        )
+
+    # Non-cash methods require transaction/reference ID
+    if method_norm != "CASH":
+        if not data.reference or not data.reference.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A transaction reference ID is required for non-cash disbursement via '{method_norm}'.",
+            )
+
+    # Per-method disbursement limit check (cannot disburse more than paid on that channel)
+    earlier_disbursed_for_channel = sum(
+        r.amount
+        for r in invoice.refund_requests
+        if r.id != req.id and r.status == "DISBURSED" and r.disbursement_method and r.disbursement_method.upper() == method_norm
+    )
+    max_disbursable = max(0, paid_channels[method_norm] - earlier_disbursed_for_channel)
+    if req.amount > max_disbursable:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Disbursement amount of Tk {req.amount} exceeds available paid balance of Tk {max_disbursable} for channel '{method_norm}'.",
+        )
+
     req.status = "DISBURSED"
     req.disbursed_at = now_ts
     req.disbursed_by_id = disburser_id
-    req.disbursement_method = data.method.upper()
+    req.disbursement_method = method_norm
     req.disbursement_reference = data.reference.strip() if data.reference else None
 
-    invoice = req.invoice
+    # Reduce active day cash drawer if disbursed in cash
+    if method_norm == "CASH":
+        active_day = db.execute(
+            select(BusinessDay).where(
+                BusinessDay.tenant_id == tenant_id,
+                BusinessDay.status == "OPEN",
+            )
+        ).scalar_one_or_none()
+        if active_day:
+            channel_rec = db.execute(
+                select(BusinessDayChannelBalance).where(
+                    BusinessDayChannelBalance.business_day_id == active_day.id,
+                    BusinessDayChannelBalance.channel == "CASH",
+                )
+            ).scalar_one_or_none()
+            if channel_rec:
+                channel_rec.received_amount = max(0, channel_rec.received_amount - req.amount)
+
     invoice.refund_due = max(0, invoice.refund_due - req.amount)
 
     # Recompute invoice refund_status
@@ -518,7 +620,7 @@ def disburse_refund(
             after_value=f"Line: {req.invoice_line_id}, Refund Disbursed: Tk {req.amount}, Channel: {req.disbursement_method}",
         )
 
-    # Append operational event
+    # Append operational event (amount-free description for technician isolation)
     line = req.invoice_line
     if line and line.test_order:
         ev = TestOrderEvent(
@@ -526,7 +628,7 @@ def disburse_refund(
             test_order_id=line.test_order.id,
             event_type="REFUND_DISBURSED",
             stage="DISBURSED",
-            description=f"Refund of Tk {req.amount} disbursed via {req.disbursement_method}",
+            description=f"Refund disbursed via {req.disbursement_method}",
             notes=f"Ref: {req.disbursement_reference or 'N/A'} | Notes: {data.notes or ''}".strip(),
             actor_id=disburser_id,
             actor_role=acting_role,

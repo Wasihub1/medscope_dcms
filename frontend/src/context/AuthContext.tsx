@@ -1,51 +1,32 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Role, BusinessDay } from '../types';
-import { setApiActor, api } from '../api/client';
-
-export type DevActorMode = 'RECEPTIONIST' | 'ADMIN' | 'LAB_TECH_KAMAL' | 'LAB_TECH_NASRIN';
+import { Role, BusinessDay, AuthUser } from '../types';
+import { api, setUnauthorizedCallback } from '../api/client';
 
 interface AuthContextType {
+  user: AuthUser | null;
   role: Role;
-  actorMode: DevActorMode;
   staffName: string;
   staffId: string;
   department: string;
   tenantName: string;
   businessDay: BusinessDay | null;
-  toggleRole: () => void;
-  setMode: (mode: DevActorMode) => void;
-  refreshBusinessDay: () => Promise<void>;
+  isAuthenticated: boolean;
+  isLoading: boolean;
   isLoadingBusinessDay: boolean;
+  login: (username: string, password: string, role?: string) => Promise<AuthUser>;
+  logout: () => Promise<void>;
+  switchRole: (role: string) => Promise<void>;
+  refreshBusinessDay: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [actorMode, setActorMode] = useState<DevActorMode>('RECEPTIONIST');
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [businessDay, setBusinessDay] = useState<BusinessDay | null>(null);
-  const [isLoadingBusinessDay, setIsLoadingBusinessDay] = useState(false);
-
-  let role: Role = 'RECEPTIONIST';
-  let staffName = 'Fatima Akter (Receptionist)';
-  let staffId = '1';
-  let department = 'Front Desk';
-
-  if (actorMode === 'ADMIN') {
-    role = 'ADMIN';
-    staffName = 'Tariqul Islam (Admin)';
-    staffId = '2';
-    department = 'Administration';
-  } else if (actorMode === 'LAB_TECH_KAMAL') {
-    role = 'LAB_TECH';
-    staffName = 'Kamal Hossain (Lab Tech)';
-    staffId = '3';
-    department = 'Hematology';
-  } else if (actorMode === 'LAB_TECH_NASRIN') {
-    role = 'LAB_TECH';
-    staffName = 'Nasrin Sultana (Lab Tech)';
-    staffId = '4';
-    department = 'Biochemical Tests';
-  }
+  const [isLoadingBusinessDay, setIsLoadingBusinessDay] = useState<boolean>(false);
 
   const tenantName = 'Seba Diagnostic Center (সেবা ডায়াগনস্টিক সেন্টার)';
 
@@ -54,55 +35,87 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const day = await api.getCurrentBusinessDay();
       setBusinessDay(day);
-    } catch (err) {
-      console.error('Failed to fetch business day:', err);
+    } catch {
       setBusinessDay(null);
     } finally {
       setIsLoadingBusinessDay(false);
     }
   }, []);
 
-  useEffect(() => {
-    refreshBusinessDay();
+  const refreshUser = useCallback(async () => {
+    try {
+      const me = await api.getMe();
+      setUser(me);
+      await refreshBusinessDay();
+    } catch {
+      setUser(null);
+      setBusinessDay(null);
+    }
   }, [refreshBusinessDay]);
 
-  const setMode = (mode: DevActorMode) => {
-    setActorMode(mode);
-    if (mode === 'ADMIN') {
-      setApiActor('ADMIN', 2);
-    } else if (mode === 'LAB_TECH_KAMAL') {
-      setApiActor('LAB_TECH', 3);
-    } else if (mode === 'LAB_TECH_NASRIN') {
-      setApiActor('LAB_TECH', 4);
-    } else {
-      setApiActor('RECEPTIONIST', 1);
+  useEffect(() => {
+    // Initial check for active session
+    refreshUser().finally(() => {
+      setIsLoading(false);
+    });
+
+    // Handle 401 expiration across API requests
+    setUnauthorizedCallback(() => {
+      setUser(null);
+      setBusinessDay(null);
+    });
+
+    return () => {
+      setUnauthorizedCallback(null);
+    };
+  }, [refreshUser]);
+
+  const login = async (username: string, password: string, role?: string): Promise<AuthUser> => {
+    const authUser = await api.login(username, password, role);
+    setUser(authUser);
+    await refreshBusinessDay();
+    return authUser;
+  };
+
+  const logout = async () => {
+    try {
+      await api.logout();
+    } catch {
+      // Ignore logout errors
+    } finally {
+      setUser(null);
+      setBusinessDay(null);
     }
   };
 
-  const toggleRole = () => {
-    const cycle: Record<DevActorMode, DevActorMode> = {
-      RECEPTIONIST: 'ADMIN',
-      ADMIN: 'LAB_TECH_KAMAL',
-      LAB_TECH_KAMAL: 'LAB_TECH_NASRIN',
-      LAB_TECH_NASRIN: 'RECEPTIONIST',
-    };
-    setMode(cycle[actorMode]);
+  const switchRole = async (newRole: string) => {
+    const updated = await api.switchActingRole(newRole);
+    setUser(updated);
   };
+
+  const role: Role = user?.acting_role || 'RECEPTIONIST';
+  const staffName = user?.display_name || '';
+  const staffId = String(user?.id || '');
+  const department = user?.department || 'General';
 
   return (
     <AuthContext.Provider
       value={{
+        user,
         role,
-        actorMode,
         staffName,
         staffId,
         department,
         tenantName,
         businessDay,
-        toggleRole,
-        setMode,
-        refreshBusinessDay,
+        isAuthenticated: Boolean(user),
+        isLoading,
         isLoadingBusinessDay,
+        login,
+        logout,
+        switchRole,
+        refreshBusinessDay,
+        refreshUser,
       }}
     >
       {children}

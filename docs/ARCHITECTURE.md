@@ -5,9 +5,9 @@
 MedScope operates on a modernized, dual-stack architecture designed to handle high-throughput diagnostic intake desks while preserving core clinical and double-entry accounting ledgers:
 
 - **Frontend (`frontend/`):** React 19, TypeScript, Vite 8, Tailwind CSS v4, Lucide Icons, React Router v7. Provides sub-millisecond local state updates, zero-rerun keyboard shortcuts, and native print formatting.
-- **Backend (`backend/`):** FastAPI, Pydantic v2, SQLAlchemy 2.0 ORM, and async-capable architecture. Provides strict OpenAPI schema contracts, sub-5ms API response latency, and modular REST design.
-- **Database:** PostgreSQL 18 on port 5432 (`medscope_dcms`, user: `medscope_app`) managed via Alembic migrations.
-- **Testing Infrastructure:** Automated pytest integration suite (19 test cases) + real-browser Playwright E2E suite (6 comprehensive suites in Chromium).
+- **Backend (`backend/`):** FastAPI, Pydantic v2, SQLAlchemy 2.0 ORM, and async-capable architecture. Provides strict OpenAPI schema contracts, sub-5ms API response latency, and modular REST design (62 paths / 72 operations).
+- **Database:** PostgreSQL 18 on port 5432 (`medscope_dcms`, user: `medscope_app`) managed via Alembic migrations (27 domain entities, 28 tables total).
+- **Testing Infrastructure:** Automated pytest integration suite (45 test cases passing in-process against isolated `medscope_test`) with zero browser automation.
 - **Legacy Stack (`DCMS V1.py`, `accounting.py`):** Streamlit + SQLite preserved for internal laboratory analysis and specialized double-entry accounting routines.
 
 ```
@@ -17,7 +17,7 @@ MedScope operates on a modernized, dual-stack architecture designed to handle hi
 |                                                                                   |
 |  [ Modern Client ]                 [ REST API Gateway ]           [ PostgreSQL ]  |
 |  React 19 + Vite 8                 FastAPI (Python 3.14)          Version 18      |
-|  - Bento Grid Layout               - 36 REST Endpoints            - 25 Domain Tbl |
+|  - Bento Grid Layout               - 62 Paths / 72 Ops            - 25 Domain Tbl |
 |  - 60-30-10 Palette                - Multi-tenant Isolation       - Alembic Migr. |
 |  - A4 Landscape Dual-Copy Print    - Whole-Taka Integers          - Monotonic Seq.|
 |  - Dev Staff Switcher              - Role Security Middleware     - Concurrency   |
@@ -52,7 +52,7 @@ MedScope/
 │   │   ├── schemas/                  # Pydantic v2 request/response schemas
 │   │   ├── services/                 # Business logic, audit logging, sequences
 │   │   └── main.py                   # FastAPI application initialization & CORS
-│   ├── scripts/                      # Seed and utility scripts (seed.py)
+│   ├── scripts/                      # Seed, admin CLI, and SQL utility scripts (seed.py, manage_users.py, sql/cleanup_test_data.sql)
 │   └── requirements.txt              # Backend dependencies
 ├── frontend/
 │   ├── e2e/                          # Real browser Playwright E2E test suites
@@ -215,21 +215,117 @@ MedScope/
   - **Two-Stage Refund Separation:** Admin review marks the request `APPROVED` and invoice `REFUND_APPROVED`. Money disbursement is an explicit separate action performed by the Cashier or Admin, recording the payout channel (`CASH`, `BKASH`, `NAGAD`, etc.), drawer deduction, and reversing referral commissions.
 - **Consequences:** Prevents phantom drawer shortages by ensuring cash is deducted only when physically paid out, while upholding the D15 invariant against unauthorized cancellations.
 
+### ADL-020: Original Payment Channel Enforcement for Refunds (Rules 3.1, D18, M29)
+- **Decision:**
+  - `disburse_refund` strictly validates that the refund disbursement method matches one of the payment channels actually used on that invoice (`CASH`, `BKASH`, `NAGAD`, `POS_CARD`, `BANK_TRANSFER`).
+  - Mandatory transaction reference number on non-cash disbursements.
+  - Enforce per-channel payment balance limits: cumulative disbursements through any channel cannot exceed what was paid via that channel.
+  - Cash disbursements decrement the active business day drawer balance.
+- **Consequences:** Prevents financial leakages, money laundering across payment methods, and unbalanced physical cash drawers.
+
+### ADL-021: Segregation of Duties on Refund Approval (Rule 3.6, D56)
+- **Decision:**
+  - Self-approval of refund requests is blocked (`reviewer_id == requested_by_id` returns HTTP 403 Forbidden).
+  - Emits immutable security audit log `REFUND_SELF_APPROVAL_BLOCKED`.
+  - Check is encapsulated in a dedicated helper `enforce_segregation_of_duties` so it can be made configurable per customer ("Small Center Mode") in the future centralized permission layer.
+- **Consequences:** Eliminates single-operator embezzlement risk while maintaining clean code architecture for small-center operational toggles.
+
+### ADL-022: Culture Lifecycle Decoupling (Rule D19, M12)
+- **Decision:**
+  - Decouple culture stage progression (`INCUBATING` -> `PRELIMINARY` -> `FINAL`) from `TestOrder.status`.
+  - Setting `culture_stage = "FINAL"` keeps order status as `IN_PROGRESS` (does NOT auto-complete).
+  - Completing a culture test order requires entering results after reaching the `FINAL` stage.
+- **Consequences:** Aligns system state with laboratory microbiology reality where incubation completion is not synonymous with verified report completion.
+
+### ADL-023: Result-Save Guards & Completed Order Immutability
+- **Decision:**
+  - Modifying or resaving results on a `COMPLETED` order is strictly rejected with HTTP 409 Conflict. Post-completion edits belong to future Correction workflows (Module 15).
+  - Saving a `DRAFT` result preserves `TestOrder.status` (does NOT advance intermediate state).
+  - For sample-based tests, entering or saving results prior to specimen collection is strictly rejected with HTTP 409 Conflict.
+- **Consequences:** Prevents accidental or fraudulent modification of completed clinical reports, enforces specimen collection prerequisite, and preserves draft state machines.
+
+### ADL-024: Technician Financial Isolation (Rule M11.3, 3.8)
+- **Decision:**
+  - Technicians operate strictly on clinical data. `POST /api/v1/worklist/{id}/d15-refund-request` returns `D15RefundClinicalResponse` omitting all pricing, amount, and refund values.
+  - Test order lifecycle timeline (`GET /api/v1/worklist/{id}/events`) dynamically sanitizes monetary figures (`Tk` and `৳`) for `LAB_TECH` callers, while maintaining raw audit rows for Admins/Owners.
+- **Consequences:** Prevents commercial pricing leakage to floor staff while providing necessary operational timeline context.
+
+### ADL-025: In-Place Patient Operational Profile Overlay (Prompt 08 Part A)
+- **Context:** Opening patient details or history from an invoice detail modal previously triggered `navigate('/patients?id=...')`, which switched the background page/tab to Patients and lost Invoices search filters, status filters, and scroll position.
+- **Decision:** Encapsulate the patient operational history view in a reusable `PatientHistoryModal` component. Screens such as `InvoicesPage` render patient history directly in an overlay modal without navigating or unmounting the underlying page.
+- **Consequences:** Preserves the user's active page, filter criteria, and scroll state across detail inspection workflows.
+
+### ADL-026: Test Database Isolation & Pytest Guard (Prompt 08 Part B)
+- **Context:** Automated tests previously checked for a live server on port 8000 and issued HTTP requests to it, writing synthetic records into the primary development/QA database (`medscope_dcms`).
+- **Decision:**
+  - Mandate isolated test database execution via `TEST_DATABASE_URL` (e.g. `medscope_test`).
+  - Introduce a hard guard in `tests/conftest.py` that halts test execution with `pytest.UsageError` if `TEST_DATABASE_URL` resolves to the main/QA database.
+  - Execute the full Alembic migration chain from `<base>` to head at test session start.
+  - Remove all live-server network probing; tests run strictly in-process via FastAPI's `TestClient`.
+- **Consequences:** Completely prevents test data pollution in QA/production environments while verifying database migrations from scratch.
+
+### ADL-027: Server-Side Session Authentication & HttpOnly Cookie Transport (Prompt 09)
+- **Context:** The frontend previously trusted an unauthenticated development role switcher that passed arbitrary staff IDs and roles via request headers.
+- **Decision:**
+  - Replace header-based identity switching with stateful, server-side sessions stored in `auth_sessions`.
+  - Pass raw 256-bit entropy tokens in `HttpOnly`, `SameSite=Lax`, `Path=/` cookies (`medscope_session`), or `Authorization: Bearer <token>` for API clients.
+  - Store only SHA-256 hashes of session tokens in the database.
+  - Enforce `X-Requested-With: XMLHttpRequest` custom header on all state-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`) as CSRF mitigation.
+  - Enforce idle timeout (120 minutes) and absolute session lifetime (24 hours).
+  - Hash passwords using Argon2id (`argon2-cffi`) with min 8 characters and non-username rule.
+  - Trigger automatic account lockout after 5 consecutive failed login attempts.
+- **Consequences:** Provides cryptographic security against session hijacking, XSS token extraction, and brute-force attacks, while completely removing identity spoofing from the application.
+
+### ADL-028: Multi-Role Assignment & Acting Role Session State (Prompt 09)
+- **Context:** Diagnostic centers often employ staff who operate in multiple roles (e.g. Receptionist during morning intake, Cashier during afternoon reconciliation; or Admin who is also an Owner).
+- **Decision:**
+  - Introduce `staff_roles` mapping table allowing multiple roles per person.
+  - Maintain active `acting_role` inside `auth_sessions`.
+  - Provide `POST /api/v1/auth/acting-role` to allow authenticated users to switch acting roles among their granted roles.
+  - Route handlers continue using existing role guards (`require_receptionist`, `require_admin`, `require_lab_tech_or_admin`) bound to `actor.role = session.acting_role`.
+- **Consequences:** Eliminates code refactoring in business services while supporting flexible role assignment with full audit trail traceability.
+
+### ADL-029: Self-Hosted Font Strategy (Prompt 10)
+- **Context:** Low-bandwidth clinical center networks in Bangladesh frequently drop or throttle third-party CDN requests (such as Google Fonts), causing layout shift or missing fallback glyphs.
+- **Decision:** Package Manrope (`@fontsource/manrope`) and Noto Sans Bengali (`@fontsource/noto-sans-bengali`) as local npm dependencies bundled directly into Vite build artifacts (`dist/assets/`). Prohibit all external CDN and runtime Google Fonts requests.
+- **Consequences:** Zero external network dependencies for typography; 100% offline-resilient rendering of English and Bengali characters with identical baseline metrics.
+
+### ADL-030: Public Routing, Role Home Redirection & Branded 404 (Prompt 10)
+- **Context:** The application previously lacked public marketing and authentication entry points, and root `/` coupled directly to the internal dashboard.
+- **Decision:**
+  - Mount `/` as the public branded landing page.
+  - Mount `/login` as the public animated sign-in page.
+  - Mount `/dashboard` as the authenticated executive workbench.
+  - Route unauthenticated access to protected routes to `/login`.
+  - Redirect authenticated staff who open `/` or `/login` directly to their designated role home route (`/invoices` for Receptionist/Cashier, `/worklist` for Lab Tech, `/dashboard` for Admin/Owner).
+  - Catch-all `*` renders a branded 404 page (`NotFoundPage`).
+- **Consequences:** Clean separation of public entry surfaces and authenticated operational workspaces without route collision or unauthorized data exposure.
+
+### ADL-031: Lightweight CSS Keyframe Animation Architecture (Prompt 10)
+- **Context:** High-motion marketing libraries (such as Three.js, Lottie, or heavy canvas runners) degrade front-desk hardware performance and violate the lightweight clinical footprint.
+- **Decision:** Implement all interactive and medical scene animations (ECG heartbeat line, filling tube, travelling dot, sequential chips, pulsing peak marker, and marquee) strictly via pure vector SVG and native CSS keyframes animating only `transform`, `opacity`, and `stroke-dashoffset` using the weighted deceleration curve `cubic-bezier(0.22, 1, 0.36, 1)`. Full fallback under `@media (prefers-reduced-motion: reduce)`.
+- **Consequences:** Ultra-fast rendering (~60fps on low-end hardware) with zero JavaScript execution overhead during animation frames.
+
 ---
 
-## 4. Security & Actor Context Headers
+## 4. Security & Authentication Architecture (Prompt 09)
 
-### Development Actor Harness
-Authentication in the development environment operates via stateless actor context headers supplied on every request:
+Header-based identity switching (`X-Staff-Role`, `X-Staff-Id`) was **completely removed** in Prompt 09. Authentication is strictly enforced via cryptographically validated server-side sessions:
 
-| Header Name | Accepted Alias | Purpose | Example |
-| :--- | :--- | :--- | :--- |
-| `X-Tenant-Id` | - | Tenant scope partition | `center-seba-01` |
-| `X-Staff-Id` | `X-Actor-Id` | ID of operating staff member | `1` (Fatima), `2` (Tariqul), `3` (Kamal), `4` (Nasrin) |
-| `X-Staff-Role` | `X-Actor-Role` | Role for RBAC checks | `RECEPTIONIST`, `ADMIN`, `LAB_TECH` |
-| `X-Actor-Name` | - | Attribution name for audit log | `Fatima Akter`, `Kamal Hossain` |
-
-The FastAPI middleware dependency `get_current_actor` parses these headers, validates tenant existence, resolves defaults, and returns a verified `CurrentActor` instance used across all endpoint handlers.
-
-> [!WARNING] Development Security Limitation
-> Header-based identity switching (`X-Staff-Role`, `X-Staff-Id`) is strictly a development and E2E testing harness. It allows simulated multi-role verification without entering passwords on every test run. In production, this harness MUST be disabled and replaced with cryptographically signed HTTP-only JWT session cookies issued by a centralized authentication provider with bcrypt password hashing and PIN validation.
+### Session Lifecycle & Storage
+- **Session Table:** `auth_sessions` tracks `session_token_hash` (SHA-256), `staff_id`, `tenant_id`, `acting_role`, `created_at`, `expires_at`, `last_seen_at`, `revoked_at`, `user_agent`, `ip_address`.
+- **Token Delivery:**
+  - Browser UI: Transports via `HttpOnly`, `SameSite=Lax`, `Path=/` cookie named `medscope_session`. JavaScript cannot access the token.
+  - Headless / API Clients: Transports via `Authorization: Bearer <raw_token>` or `X-Session-Token` header.
+- **CSRF Defense:** State-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`) authenticated via cookie require a non-empty `X-Requested-With` header (e.g. `XMLHttpRequest`).
+- **Session Timeouts:**
+  - Idle Timeout: Sessions inactive for more than 120 minutes are revoked automatically.
+  - Absolute Lifetime: Sessions expire 24 hours after creation regardless of activity.
+- **Password Security:**
+  - Hasher: Argon2id via `argon2-cffi`.
+  - Password Policies: Minimum 8 characters; password cannot match username.
+  - Brute-Force Lockout: 5 consecutive failed attempts trigger automated account lock (`locked_at = utc_now()`). Requires Admin/Owner unlock.
+- **Multi-Role Governance:**
+  - Table `staff_roles` maps staff members to permitted operational roles (`RECEPTIONIST`, `CASHIER`, `ADMIN`, `OWNER`, `LAB_TECH`).
+  - Active session holds single `acting_role`, dynamically switchable among granted roles via `/auth/acting-role`.
+  - All audit log events persist the user's `acting_role`.
