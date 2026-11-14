@@ -88,3 +88,8 @@ voshu.zip
 *.swo
 .DS_Store
 Thumbs.db
+
+# Local tooling caches and working notes
+.vite/
+prompt/
+report/
