@@ -35,14 +35,22 @@ class TestOrder(Base):
     outsourced_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     outsourced_ref_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
+    # Prompt 10E Part 7: routing target is a room (lab section), never one technician.
+    # assigned_to_id only records who actually acted; it is not used for visibility.
+    lab_section: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     assigned_to_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("staff.id"), nullable=True)
     assigned_destination: Mapped[str | None] = mapped_column(String(100), nullable=True)
     assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     assigned_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("staff.id"), nullable=True)
 
+    # Prompt 15 (D22): the doctor (referrers row) whose queue this order sits in for doctor approval.
+    # Set by Admin/Owner; a DOCTOR login only sees orders assigned to their own doctor profile.
+    assigned_doctor_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("referrers.id"), nullable=True, index=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
     invoice_line: Mapped["InvoiceLine"] = relationship("InvoiceLine", back_populates="test_order")
+    doctor_approval: Mapped["DoctorApproval | None"] = relationship("DoctorApproval", back_populates="test_order", uselist=False)
     assigned_to: Mapped["Staff | None"] = relationship("Staff", foreign_keys=[assigned_to_id])
     assigned_by: Mapped["Staff | None"] = relationship("Staff", foreign_keys=[assigned_by_id])
     sample: Mapped["Sample | None"] = relationship("Sample", back_populates="test_order", uselist=False)

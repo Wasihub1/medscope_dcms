@@ -26,6 +26,20 @@ class InvoiceLineCreate(BaseModel):
         return data
 
 
+# Prompt 10E Part 3: age is a whole number; infants are recorded in months or days.
+# The limits are all equivalent to 130 years.
+AGE_UNIT_LIMITS = {"years": 130, "months": 130 * 12, "days": 130 * 365}
+GENDER_VALUES = ("Male", "Female", "Other")
+
+
+def normalize_gender(value: Optional[str]) -> str:
+    v = (value or "").strip().lower()
+    for g in GENDER_VALUES:
+        if v == g.lower() or (len(v) == 1 and v == g[0].lower()):
+            return g
+    raise ValueError(f"Gender must be one of: {', '.join(GENDER_VALUES)}.")
+
+
 class InvoiceConfirmRequest(BaseModel):
     patient_id: int
     prescribed_by_id: Optional[int] = None
@@ -43,17 +57,20 @@ class InvoiceConfirmRequest(BaseModel):
 
     # Initial payment
     initial_payment_amount: int = Field(default=0, ge=0)
-    initial_payment_method: str = Field(default="CASH", description="CASH, BKASH, NAGAD, BANK_TRANSFER, POS_CARD")
+    initial_payment_method: str = Field(default="CASH", description="CASH, BKASH, NAGAD, ROCKET, POS_CARD, BANK_TRANSFER, OTHER")
     initial_payment_reference: Optional[str] = Field(default=None)
+    # Prompt 10E Part 4: name of the channel when initial_payment_method is OTHER (required then)
+    initial_payment_channel_detail: Optional[str] = Field(default=None, max_length=100)
     cash_tendered: Optional[int] = Field(default=None, ge=0)
     initial_payment: Optional[Union[dict, int, float]] = None
     payment_method: Optional[str] = None
     notes: Optional[str] = None
 
-    # Visit demographics snapshot
-    age_value: int = Field(default=30, ge=0)
-    age_unit: str = Field(default="years")
-    gender: str = Field(default="Male")
+    # Visit demographics snapshot (Prompt 10E Part 3): no silent defaults. A draft may omit
+    # them; Finalize requires both age and gender (enforced in the service).
+    age_value: Optional[int] = Field(default=None, ge=0)
+    age_unit: str = Field(default="years", description="years, months, days")
+    gender: Optional[str] = Field(default=None, description="Male, Female, Other")
 
     @model_validator(mode="before")
     @classmethod
@@ -78,12 +95,38 @@ class InvoiceConfirmRequest(BaseModel):
                 data["initial_payment_amount"] = int(init_pmt.get("amount", 0))
                 data["initial_payment_method"] = str(init_pmt.get("channel", "CASH")).upper()
                 data["initial_payment_reference"] = init_pmt.get("reference_no")
+                if init_pmt.get("channel_detail") is not None:
+                    data["initial_payment_channel_detail"] = init_pmt.get("channel_detail")
             elif isinstance(init_pmt, (int, float)):
                 data["initial_payment_amount"] = int(init_pmt)
 
             if "payment_method" in data and "initial_payment_method" not in data:
                 data["initial_payment_method"] = str(data["payment_method"]).upper()
+
+            # Age aliases (age_years / age_months) used by the patient form
+            if data.get("age_value") in (None, "") and data.get("age_years") not in (None, ""):
+                data["age_value"] = int(data["age_years"])
+                data["age_unit"] = "years"
+            elif data.get("age_value") in (None, "") and data.get("age_months") not in (None, ""):
+                data["age_value"] = int(data["age_months"])
+                data["age_unit"] = "months"
+            if data.get("age_value") == "":
+                data["age_value"] = None
+            if data.get("gender") == "":
+                data["gender"] = None
         return data
+
+    @model_validator(mode="after")
+    def validate_demographics(self):
+        unit = (self.age_unit or "years").strip().lower()
+        if unit not in AGE_UNIT_LIMITS:
+            raise ValueError(f"age_unit must be one of: {', '.join(AGE_UNIT_LIMITS)}.")
+        self.age_unit = unit
+        if self.age_value is not None and not (0 <= self.age_value <= AGE_UNIT_LIMITS[unit]):
+            raise ValueError(f"Age must be a whole number between 0 and {AGE_UNIT_LIMITS[unit]} {unit}.")
+        if self.gender is not None:
+            self.gender = normalize_gender(self.gender)
+        return self
 
     @model_validator(mode="after")
     def validate_no_duplicate_lines(self):
@@ -115,7 +158,16 @@ class InvoiceLineResponse(BaseSchema):
     outcome: Optional[str] = None
     d15_refund_status: Optional[str] = None
     d15_refund_reason: Optional[str] = None
+    # Prompt 13: explicit cancellation state, the label to show (precedence over sample status) and
+    # whether "Request Cancellation" may be offered for this line right now.
+    cancellation_state: str = "NONE"
+    display_status: Optional[str] = None
+    can_request_cancellation: bool = False
     net_amount: Optional[int] = None
+    # Prompt 10E: urgent fee charged for this line (informational; the fee belongs to the
+    # invoice and is never refunded on cancellation) and the lab room of its test order
+    line_urgent_fee: int = 0
+    lab_section: Optional[str] = None
 
     # Aliases for direct client and print preview consumption
     test_name: Optional[str] = None
@@ -148,7 +200,7 @@ class InvoiceResponse(BaseSchema):
     invoice_no: str
     temp_invoice_id: Optional[str] = None
     patient_id: int
-    visit_id: int
+    visit_id: Optional[int] = None  # None while the invoice is a DRAFT (Prompt 10D)
     prescribed_by_id: Optional[int] = None
     prescribed_by_name: Optional[str] = None
     referrer_id: Optional[int] = None
@@ -175,9 +227,14 @@ class InvoiceResponse(BaseSchema):
     net_amount: Optional[int] = None
     paid_amount: Optional[int] = None
     due_amount: Optional[int] = None
+    is_draft: bool = False
+    finalized_at: Optional[datetime] = None
+    # Prompt 10E Part 5: urgent fee computed by the backend and included in net
+    urgent_fee: int = 0
 
     @model_validator(mode="after")
     def populate_invoice_aliases(self):
+        self.is_draft = (self.status == "DRAFT")
         if not self.invoice_number:
             self.invoice_number = self.invoice_no
         if not self.patient_mrn:
@@ -205,6 +262,12 @@ class InvoiceDetailResponse(InvoiceResponse):
     reprint_timestamp: Optional[datetime] = None
     reprinted_by_name: Optional[str] = None
     refund_requests: List[Any] = []
+    # Prompt 10D: saved draft form (only meaningful while status == DRAFT) for reopen/edit
+    draft_payload: Optional[dict] = None
+    # Prompt 10E Part 3: visit snapshot (None while DRAFT)
+    age_value: Optional[int] = None
+    age_unit: Optional[str] = None
+    visit_gender: Optional[str] = None
 
 
 from backend.app.schemas.payment import PaymentResponse

@@ -14,8 +14,10 @@ class Payment(Base):
     business_day_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("business_days.id"), nullable=True, index=True)
 
     amount: Mapped[int] = mapped_column(Integer, nullable=False)  # Whole-Taka integer
-    method: Mapped[str] = mapped_column(String(50), nullable=False)  # CASH, BKASH, NAGAD, BANK_TRANSFER, POS_CARD
+    method: Mapped[str] = mapped_column(String(50), nullable=False)  # CASH, BKASH, NAGAD, ROCKET, POS_CARD, BANK_TRANSFER, OTHER
     reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Prompt 10E: channel name typed by the cashier when method is OTHER
+    channel_detail: Mapped[str | None] = mapped_column(String(100), nullable=True)
     change_amount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

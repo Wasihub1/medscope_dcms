@@ -15,15 +15,117 @@ import {
   Printer,
   Eye,
   Loader2,
+  FlaskConical,
+  UserCog,
 } from 'lucide-react';
 import { api } from '../../api/client';
-import { DashboardMetrics, Invoice } from '../../types';
+import { DashboardMetrics, Invoice, WorklistSummary } from '../../types';
+import { useAuth } from '../../context/AuthContext';
 import { Badge } from '../../components/common/Badge';
 import { DualCopyInvoiceModal } from '../../components/common/DualCopyInvoiceModal';
 import { formatPaymentStatus, getPaymentStatusBadgeVariant } from '../../utils/formatters';
 import { useToast } from '../../context/ToastContext';
 
+/**
+ * Prompt 10D (ADL-033): every login lands here. Each role sees only what it may see:
+ * - 'dashboard.view' (front desk, Admin, Owner): the financial Bento dashboard below.
+ * - otherwise (LAB_TECH by default): a money-free view with worklist counts only.
+ * Every role gets a clear link to its main work page.
+ */
 export const DashboardPage: React.FC = () => {
+  const { hasPermission, staffName, role } = useAuth();
+  const navigate = useNavigate();
+  const mainLinks: { label: string; path: string; icon: React.ElementType; testId: string }[] = [];
+  if (hasPermission('invoice.view')) mainLinks.push({ label: 'Open Invoices', path: '/invoices', icon: Receipt, testId: 'dashboard-goto-invoices' });
+  if (hasPermission('worklist.view')) mainLinks.push({ label: 'Open My Worklist', path: '/worklist', icon: FlaskConical, testId: 'dashboard-goto-worklist' });
+  if (hasPermission('user.manage')) mainLinks.push({ label: 'Manage Users', path: '/users', icon: UserCog, testId: 'dashboard-goto-users' });
+
+  return (
+    <div className="space-y-5" data-testid="dashboard-page">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#FAF9F6] border border-[#DCDAD4] rounded-2xl px-4 py-3">
+        <div className="min-w-0">
+          <h1 className="text-base font-bold text-[#1B1B0E] truncate">Welcome, {staffName || 'staff member'}</h1>
+          <p className="text-[11px] text-[#6D6A60]">Signed in as {role}. Your main work page:</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {mainLinks.map((l) => {
+            const Icon = l.icon;
+            return (
+              <button
+                key={l.path}
+                onClick={() => navigate(l.path)}
+                data-testid={l.testId}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#26270F] bg-[#CF8852] hover:bg-[#B7703B] hover:text-white rounded-xl transition-colors cursor-pointer"
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span>{l.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {hasPermission('dashboard.view') ? <FinancialDashboard /> : <LabSafeDashboard canSeeWorklist={hasPermission('worklist.view')} />}
+    </div>
+  );
+};
+
+/** Money-free dashboard (LAB_TECH by default): worklist counts only, from /worklist/summary. */
+const LabSafeDashboard: React.FC<{ canSeeWorklist: boolean }> = ({ canSeeWorklist }) => {
+  const [summary, setSummary] = useState<WorklistSummary | null>(null);
+  const [loading, setLoading] = useState(canSeeWorklist);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!canSeeWorklist) return;
+    api
+      .getWorklistSummary()
+      .then(setSummary)
+      .catch(() => setSummary(null))
+      .finally(() => setLoading(false));
+  }, [canSeeWorklist]);
+
+  if (!canSeeWorklist) {
+    return (
+      <div className="bg-white border border-[#DCDAD4] rounded-2xl p-5 text-xs text-[#6D6A60]">
+        No dashboard widgets are enabled for your account. Ask an administrator if you need access.
+      </div>
+    );
+  }
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-40">
+        <Loader2 className="w-6 h-6 text-[#CF8852] animate-spin" />
+      </div>
+    );
+  }
+  const tiles: { label: string; value: number; filter?: string }[] = [
+    { label: 'Assigned to me', value: summary?.total_assigned ?? 0 },
+    { label: 'Urgent (STAT)', value: summary?.urgent_count ?? 0 },
+    { label: 'Sample pending', value: summary?.sample_pending_count ?? 0 },
+    { label: 'In progress', value: summary?.in_progress_count ?? 0 },
+    { label: 'Late', value: summary?.late_count ?? 0 },
+    { label: 'Completed', value: summary?.completed_count ?? 0 },
+  ];
+  return (
+    <div className="space-y-3" data-testid="lab-safe-dashboard">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {tiles.map((t) => (
+          <button
+            key={t.label}
+            onClick={() => navigate('/worklist')}
+            className="text-left bg-white border border-[#DCDAD4] rounded-2xl p-3 hover:border-[#CF8852] transition-colors cursor-pointer"
+          >
+            <span className="block text-[11px] text-[#6D6A60]">{t.label}</span>
+            <span className="block text-xl font-bold text-[#1B1B0E]">{t.value}</span>
+          </button>
+        ))}
+      </div>
+      <p className="text-[11px] text-[#8E8A7E]">Laboratory view. Prices, payments and dues are not shown here.</p>
+    </div>
+  );
+};
+
+const FinancialDashboard: React.FC = () => {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);

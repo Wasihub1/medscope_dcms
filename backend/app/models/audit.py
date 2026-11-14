@@ -33,18 +33,3 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
 
     actor: Mapped["Staff | None"] = relationship("Staff")
-
-
-class ReprintLog(Base):
-    __tablename__ = "reprint_logs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    entity_type: Mapped[str] = mapped_column(String(50), nullable=False) # INVOICE, REPORT
-    entity_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    reprinted_by_id: Mapped[int] = mapped_column(Integer, ForeignKey("staff.id"), nullable=False)
-    reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    reprinted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
-
-    reprinted_by: Mapped["Staff"] = relationship("Staff")
-

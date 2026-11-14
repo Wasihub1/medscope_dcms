@@ -4,6 +4,15 @@ from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy import select, desc, or_, and_, func
 from sqlalchemy.orm import Session
+from backend.app.core.permissions import has_permission, is_money_restricted
+from backend.app.core.samples import (
+    SAMPLE_REQUIRED_COMPLETE_MESSAGE,
+    SAMPLE_REQUIRED_STAGE_MESSAGE,
+    imaging_sql_clause,
+    is_imaging_test,
+    requires_sample,
+    sample_gate_blocks,
+)
 from backend.app.core.timezone import utc_now
 from backend.app.core.security import CurrentActor
 from backend.app.models.test_order import TestOrder, AssignmentHistory, TestOrderEvent
@@ -28,6 +37,11 @@ from backend.app.schemas.worklist import (
 from backend.app.services.audit_service import log_audit_event
 from backend.app.services.stock_boundary_service import trigger_specimen_stock_deduction
 from backend.app.services.barcode_service import generate_code128_svg
+from backend.app.core.lab_sections import lab_section_label
+from backend.app.models.result import Result
+from backend.app.services.line_lock_service import lock_line_at_result_completion
+from backend.app.services.routing_service import ensure_order_access, record_actor, visibility_clause
+from backend.app.services.ready_report_service import ready_clause, ready_order_ids
 
 
 def format_elapsed_time(mins: int) -> str:
@@ -41,10 +55,11 @@ def format_elapsed_time(mins: int) -> str:
     return f"{hours}h"
 
 
-def build_worklist_item(order: TestOrder) -> TechnicianWorklistItemResponse:
+def build_worklist_item(order: TestOrder, ready: Optional[bool] = None) -> TechnicianWorklistItemResponse:
     """
     Constructs a strictly financial-free operational task item
     enforcing Section 5.4 strict financial-data separation.
+    `ready`: precomputed Ready flag (batch, from the shared ready_clause); computed when None.
     """
     now_ts = utc_now()
     inv = order.invoice_line.invoice
@@ -93,6 +108,12 @@ def build_worklist_item(order: TestOrder) -> TechnicianWorklistItemResponse:
     # Result state
     has_res = bool(getattr(order, "result", None) is not None)
     res_status = order.result.status if has_res else None
+    # Prompt 10F (F3): "Ready" comes from the one shared definition (ready_report_service.ready_clause):
+    # ENTERED result, order not cancelled / not performed / awaiting doctor. Completion not required.
+    if ready is None:
+        sess = Session.object_session(order)
+        ready = bool(sess is not None and has_res and order.id in ready_order_ids(sess, [order.id]))
+    report_ready = bool(ready)
 
     # D15 Refund request check for this line
     d15_status = None
@@ -170,7 +191,40 @@ def build_worklist_item(order: TestOrder) -> TechnicianWorklistItemResponse:
         lab_clock_display=lab_elapsed_str,
         is_late=is_late,
         late_reason=late_reason,
+        requires_sample=requires_sample(test, order),
+        is_imaging=is_imaging_test(test, order),
+        lab_section=order.lab_section,
+        lab_section_label=lab_section_label(order.lab_section),
+        report_ready=report_ready,
     )
+
+
+def _worklist_base_stmt(db: Session, tenant_id: str, actor: CurrentActor, staff_id: Optional[int] = None):
+    """Orders the actor may see on the worklist (used by the list and by the summary counts)."""
+    stmt = (
+        select(TestOrder)
+        .join(TestOrder.invoice_line)
+        .join(InvoiceLine.invoice)
+        .join(Invoice.patient)
+        .where(
+            TestOrder.tenant_id == tenant_id,
+            InvoiceLine.status != "CANCELLED",
+        )
+    )
+
+    # Worklist Access Boundary (Prompt 10E Part 7): room based.
+    # - worklist.view_all (Admin/Owner): every order; staff_id inspects that technician's room.
+    # - LAB_TECH: every order whose room equals their own lab_section (assigned_to_id not needed).
+    # - DOCTOR (worklist.doctor_queue): AWAITING_DOCTOR orders from all rooms (+ completed doctor-routed).
+    if has_permission(actor, "worklist.view_all"):
+        if staff_id:
+            inspected = db.get(Staff, staff_id)
+            stmt = stmt.where(TestOrder.lab_section == (inspected.lab_section if inspected else None))
+    else:
+        clause = visibility_clause(actor)
+        if clause is not None:
+            stmt = stmt.where(clause)
+    return stmt
 
 
 def get_technician_worklist(
@@ -190,28 +244,7 @@ def get_technician_worklist(
     - A technician sees their own assigned tasks only.
     - Admin/Owner can optionally inspect by staff_id or view all tasks.
     """
-    stmt = (
-        select(TestOrder)
-        .join(TestOrder.invoice_line)
-        .join(InvoiceLine.invoice)
-        .join(Invoice.patient)
-        .where(
-            TestOrder.tenant_id == tenant_id,
-            InvoiceLine.status != "CANCELLED",
-        )
-    )
-
-    # Worklist Access Boundary:
-    if actor.role == "LAB_TECH":
-        stmt = stmt.where(TestOrder.assigned_to_id == actor.id)
-    elif actor.role in ("ADMIN", "OWNER"):
-        if staff_id:
-            stmt = stmt.where(TestOrder.assigned_to_id == staff_id)
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied. Technician or Admin authorization required.",
-        )
+    stmt = _worklist_base_stmt(db, tenant_id, actor, staff_id)
 
     # Status filter
     if status_filter and status_filter.strip() not in ("ALL", ""):
@@ -226,11 +259,17 @@ def get_technician_worklist(
         elif norm == "CULTURE":
             stmt = stmt.join(InvoiceLine.test).where(Test.report_template == "CULTURE_SENSITIVITY")
         elif norm == "IMAGING":
-            stmt = stmt.join(InvoiceLine.test).where(
-                or_(Test.requires_doctor == True, Test.performing_role == "DOCTOR", Test.report_template == "NARRATIVE")
-            )
+            # Prompt 10F: the same imaging definition as core/samples.py (single source)
+            stmt = stmt.join(InvoiceLine.test).where(imaging_sql_clause(Test))
         elif norm == "OUTSOURCED":
             stmt = stmt.join(InvoiceLine.test).where(Test.is_outsourced == True)
+        elif norm == "READY":
+            # Prompt 10F (F3): the one shared Ready definition (tile count, this list, /reports/ready)
+            stmt = stmt.where(ready_clause())
+        elif norm == "LATE":
+            pass  # evaluated after loading (late depends on the TAT clocks)
+        elif norm == "UNASSIGNED_ROOM":
+            stmt = stmt.where(TestOrder.status == "UNASSIGNED")
         else:
             stmt = stmt.where(TestOrder.status == norm)
 
@@ -266,7 +305,11 @@ def get_technician_worklist(
     stmt = stmt.order_by(desc(TestOrder.urgent), desc(TestOrder.created_at)).limit(limit)
 
     orders = list(db.execute(stmt).scalars().all())
-    return [build_worklist_item(o) for o in orders]
+    ready_ids = ready_order_ids(db, [o.id for o in orders])
+    items = [build_worklist_item(o, ready=o.id in ready_ids) for o in orders]
+    if status_filter and status_filter.strip().upper() == "LATE":
+        items = [i for i in items if i.is_late]
+    return items
 
 
 def record_sample_taken(
@@ -288,11 +331,7 @@ def record_sample_taken(
     if not order or order.tenant_id != tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test order not found.")
 
-    if actor.role == "LAB_TECH" and order.assigned_to_id != actor.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only record samples for your assigned tasks.",
-        )
+    ensure_order_access(actor, order, "You can only record samples for orders in your room.")
 
     if order.status in ("COMPLETED", "CANCELLED", "REJECTED", "SPOILED"):
         raise HTTPException(
@@ -357,6 +396,7 @@ def record_sample_taken(
     # 3. Transition order status to IN_PROGRESS if pending
     if order.status in ("ASSIGNED", "PENDING", "SAMPLE_PENDING", "UNASSIGNED"):
         order.status = "IN_PROGRESS"
+    record_actor(order, actor)  # who acted (not used for visibility)
 
     # 4. Append operational lifecycle event
     lifecycle_event = TestOrderEvent(
@@ -407,11 +447,7 @@ def record_sample_rejected(
     if not order or order.tenant_id != tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test order not found.")
 
-    if actor.role == "LAB_TECH" and order.assigned_to_id != actor.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only reject specimens for your assigned tasks.",
-        )
+    ensure_order_access(actor, order, "You can only reject specimens for orders in your room.")
 
     if not data.rejection_reason or len(data.rejection_reason.strip()) < 3:
         raise HTTPException(
@@ -488,6 +524,8 @@ def record_patient_contact(
     if not order or order.tenant_id != tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test order not found.")
 
+    ensure_order_access(actor, order)
+
     contact_status = data.contact_status.strip().upper()
     valid_statuses = ("CALLED", "RECOLLECTION_AGREED", "REFUND_REQUESTED")
     if contact_status not in valid_statuses:
@@ -561,19 +599,17 @@ def record_imaging_performed(
 ) -> TechnicianWorklistItemResponse:
     """
     Executes imaging examination performed milestone (Section 5.5).
-    - Locks invoice line at examination completion, not at sample collection.
+    - Prompt 12: does NOT lock the line any more; the line locks at result completion (line_lock_service).
     - Moves task to AWAITING_DOCTOR queue for visiting physician interpretation.
     """
     order = db.get(TestOrder, test_order_id)
     if not order or order.tenant_id != tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test order not found.")
 
+    ensure_order_access(actor, order)
+
     test = order.invoice_line.test
-    is_imaging = (
-        (test and (test.requires_doctor or test.performing_role == "DOCTOR" or test.report_template == "NARRATIVE"))
-        or order.performing_role == "DOCTOR"
-    )
-    if not is_imaging:
+    if not is_imaging_test(test, order):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This action is only applicable to Radiology and Imaging investigations.",
@@ -582,11 +618,6 @@ def record_imaging_performed(
     now_ts = utc_now()
     perf_time = data.performed_at or now_ts
     order.status = "AWAITING_DOCTOR"
-
-    # Line locks at imaging completion
-    order.invoice_line.is_locked = True
-    order.invoice_line.locked_at = perf_time
-    order.invoice_line.locked_reason = "Imaging examination performed (Locked for doctor interpretation)"
 
     lifecycle_event = TestOrderEvent(
         tenant_id=tenant_id,
@@ -610,7 +641,7 @@ def record_imaging_performed(
         entity_id=order.id,
         acting_role=actor.role,
         actor_id=actor.id,
-        after_value=f"Scan Performed. Routed to Doctor Queue. Line locked: True",
+        after_value="Scan Performed. Routed to Doctor Queue. Line not locked (locks at result completion).",
     )
 
     db.flush()
@@ -632,6 +663,8 @@ def record_culture_stage(
     if not order or order.tenant_id != tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test order not found.")
 
+    ensure_order_access(actor, order)
+
     target_stage = data.stage.strip().upper()
     valid_stages = ("INCUBATING", "PRELIMINARY", "FINAL")
     if target_stage not in valid_stages:
@@ -639,6 +672,10 @@ def record_culture_stage(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid culture stage '{target_stage}'. Must be one of: {', '.join(valid_stages)}",
         )
+
+    # Prompt 10F (F4): a culture cannot progress before its specimen is collected
+    if sample_gate_blocks(order.invoice_line.test, order):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=SAMPLE_REQUIRED_STAGE_MESSAGE)
 
     now_ts = utc_now()
     order.culture_stage = target_stage
@@ -674,6 +711,11 @@ def record_culture_stage(
     )
 
     db.flush()
+    # Module 14 (Prompt 16): a doctor approval given while the culture was still running finalizes the
+    # report now that the stage is FINAL (technician-final cultures need the explicit Finalize click).
+    if target_stage == "FINAL":
+        from backend.app.services.report_finalization_service import try_auto_finalize
+        try_auto_finalize(db, actor, order)
     return build_worklist_item(order)
 
 
@@ -692,8 +734,14 @@ def record_outsourced_stage(
     if not order or order.tenant_id != tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test order not found.")
 
+    ensure_order_access(actor, order)
+
     action = data.action.strip().upper()
     now_ts = data.timestamp or utc_now()
+
+    if action == "SENT" and sample_gate_blocks(order.invoice_line.test, order):
+        # Prompt 10F (F4): a specimen cannot be dispatched before it is collected
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=SAMPLE_REQUIRED_STAGE_MESSAGE)
 
     if action == "SENT":
         order.outsourced_status = "SENT"
@@ -764,8 +812,7 @@ def get_order_events(
     if not order or order.tenant_id != tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test order not found.")
 
-    if actor.role == "LAB_TECH" and order.assigned_to_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+    ensure_order_access(actor, order, "Access denied.")
 
     stmt = (
         select(TestOrderEvent)
@@ -774,7 +821,7 @@ def get_order_events(
     )
     events = list(db.execute(stmt).scalars().all())
 
-    is_tech = (actor.role == "LAB_TECH")
+    is_tech = is_money_restricted(actor)  # absolute, role based (never overridable)
     return [
         TestOrderEventResponse(
             id=ev.id,
@@ -803,8 +850,7 @@ def generate_barcode_label_data(
     if not order or order.tenant_id != tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test order not found.")
 
-    if actor.role == "LAB_TECH" and order.assigned_to_id != actor.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+    ensure_order_access(actor, order, "Access denied.")
 
     sample = order.sample
     if not sample or not sample.sample_code:
@@ -863,11 +909,7 @@ def update_order_status(
     if not order or order.tenant_id != tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test order not found.")
 
-    if actor.role == "LAB_TECH" and order.assigned_to_id != actor.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only update status for your assigned tasks.",
-        )
+    ensure_order_access(actor, order, "You can only update status for orders in your room.")
 
     target_status = data.status.strip().upper()
     valid_statuses = ("IN_PROGRESS", "AWAITING_DOCTOR", "COMPLETED", "SAMPLE_PENDING", "CANCELLED")
@@ -878,20 +920,20 @@ def update_order_status(
         )
 
     test = order.invoice_line.test
-    requires_sample = (test and test.sample_type is not None) or (order.sample_route == "FULL")
+    needs_sample = requires_sample(test, order)  # Prompt 10E: single helper
     requires_doctor = (test and test.requires_doctor) or (order.performing_role == "DOCTOR")
 
     # Business Transition Invariants (Prompt 06 Section 6):
     if target_status == "COMPLETED":
         # 1. Sample collection invariant
-        if requires_sample and (not order.sample or order.sample.status != "COLLECTED"):
+        if needs_sample and (not order.sample or order.sample.status != "COLLECTED"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot complete task before specimen collection. Sample must be collected first.",
+                detail=SAMPLE_REQUIRED_COMPLETE_MESSAGE,
             )
 
         # 2. Doctor routing invariant
-        if requires_doctor and actor.role == "LAB_TECH":
+        if requires_doctor and not has_permission(actor, "result.complete_doctor_routed"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Visiting physician or radiologist authorization required. Technician cannot complete doctor-routed test directly.",
@@ -915,6 +957,8 @@ def update_order_status(
     prev_status = order.status
     order.status = target_status
     now_ts = utc_now()
+    if target_status == "COMPLETED":
+        lock_line_at_result_completion(order, now_ts)  # Prompt 12: no-sample tests lock at result completion
 
     # Append operational event
     lifecycle_event = TestOrderEvent(
@@ -954,18 +998,21 @@ def get_worklist_summary(
     staff_id: Optional[int] = None,
 ) -> WorklistSummaryResponse:
     """Returns aggregated KPI summary tiles for the technician workbench."""
-    target_staff_id = actor.id if actor.role == "LAB_TECH" else (staff_id or actor.id)
+    # Prompt 10E: same room-based visibility as the list (Admin/Owner: all rooms, or the room of
+    # the inspected staff_id). Before 10E an Admin's summary counted only orders assigned to them.
+    inspect_id = staff_id if (staff_id and has_permission(actor, "worklist.view_all")) else None
+    target_staff_id = inspect_id or actor.id
     staff = db.get(Staff, target_staff_id)
     tech_name = staff.display_name if staff else actor.display_name
-    dept = staff.department if staff else None
+    section = staff.lab_section if staff else getattr(actor, "lab_section", None)
+    dept = lab_section_label(section) or (staff.department if staff else None)
 
-    # Retrieve all assigned active tasks for this technician
     items = get_technician_worklist(
         db=db,
         tenant_id=tenant_id,
         actor=actor,
-        staff_id=target_staff_id,
-        limit=500,
+        staff_id=inspect_id,
+        limit=1000,
     )
 
     total_assigned = len(items)
@@ -977,8 +1024,15 @@ def get_worklist_summary(
     completed_count = sum(1 for i in items if i.status == "COMPLETED")
     rejected_count = sum(1 for i in items if i.status in ("REJECTED", "SPOILED"))
     culture_count = sum(1 for i in items if i.report_template == "CULTURE_SENSITIVITY")
-    imaging_count = sum(1 for i in items if i.requires_doctor or i.department in ("Radiology", "Imaging", "Ultrasonogram", "X-Ray"))
+    imaging_count = sum(1 for i in items if i.is_imaging)
     outsourced_count = sum(1 for i in items if i.outsourced_status is not None)
+    # Prompt 10F (F3): counted in SQL with the same visibility and the same ready_clause as the list
+    ready_count = db.execute(
+        select(func.count()).select_from(
+            _worklist_base_stmt(db, tenant_id, actor, inspect_id).where(ready_clause()).subquery()
+        )
+    ).scalar_one()
+    unassigned_count = sum(1 for i in items if i.status == "UNASSIGNED")
 
     return WorklistSummaryResponse(
         technician_id=target_staff_id,
@@ -995,4 +1049,7 @@ def get_worklist_summary(
         culture_count=culture_count,
         imaging_count=imaging_count,
         outsourced_count=outsourced_count,
+        ready_count=ready_count,
+        unassigned_count=unassigned_count,
+        lab_section=section,
     )

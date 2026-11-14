@@ -258,6 +258,8 @@ Navigation is role-filtered by `main()`. Sensitive operations also require serve
 
 Screens include dashboard variants, New Invoice, invoice search, dues/refunds, assignment, Lab Work, report delivery, inventory, day management, Accounts & Referrers/Staff management, database management, reports, audit trail, accounting, and platform Dev.
 
+(Modern stack, Prompt 10D/10E: navigation follows the central permission layer `backend/app/core/permissions.py`; six roles OWNER, ADMIN, RECEPTIONIST, CASHIER, LAB_TECH, DOCTOR; lab work is routed by room.)
+
 Admin restrictions differ from Owner restrictions. For example, commission settings/payments and Owner reports are Owner-only; Admin can manage operational users/catalog/referrers within implemented boundaries. Platform Dev is outside the tenant role hierarchy.
 
 ## 10. Security and privacy
@@ -489,8 +491,8 @@ Following user request to eliminate empty grid responses when selecting filter o
 - **Part C — Technician Worklist (Module 11):**
   - **My Work Screen (`/worklist`):** Dedicated laboratory workbench featuring Bento KPI summary tiles (Total Assigned, Urgent STAT, Sample Pending, In Progress, Late, Completed), instant search (barcode, sample code `SMP-...`, patient name, MRN, test code), status tabs, and quick route specimen collection modals.
   - **Strict Financial Data Separation (Section 5.4):** Completely enforced at backend Pydantic serialization level (`TechnicianWorklistItemResponse`). All prices, gross, net, dues, discounts, and commissions are omitted from payloads and DOM representations.
-  - **Access Boundaries:** Technicians operating under `LAB_TECH` role context are strictly hard-filtered to `assigned_to_id == actor.id`. URL/query tampering is blocked.
-  - **Multi-Role Development Switcher:** Expanded development switcher in `AuthContext` and `Header` to cycle between Receptionist (Fatima, ID 1), Admin (Tariqul, ID 2), Tech Kamal (Hematology, ID 3), and Tech Nasrin (Biochemistry, ID 4).
+  - **Access Boundaries:** Technicians operating under `LAB_TECH` role context are strictly hard-filtered to `assigned_to_id == actor.id`. URL/query tampering is blocked. *(Historical: since Prompt 10E the filter is the technician's room, `test_orders.lab_section == staff.lab_section`.)*
+  - **Multi-Role Development Switcher (historical; removed in Prompt 09):** Expanded development switcher in `AuthContext` and `Header` to cycle between Receptionist (Fatima, ID 1), Admin (Tariqul, ID 2), Tech Kamal (Hematology, ID 3), and Tech Nasrin (Biochemistry, ID 4).
 - **Database & Migrations:**
   - Alembic revision `e05b9b1a2c3d` applied to PostgreSQL 18. Added catalog readiness fields to `tests`, `department` to `staff`, `default_sample_route` to `tenants`, and operational clock tracking fields to `test_orders`.
 - **Testing Status:**
@@ -606,7 +608,7 @@ Following user manual insertion of 1,200+ diagnostic tests into the PostgreSQL `
 ### 1. Module 13 Clinical Result Entry Engine
 - **Three Template Formats:**
   1. `NUMERIC_TABLE`: Component-driven with live flag preview and reference range comparisons (e.g. CBC, Lipid Profile, Electrolytes, LFT, KFT). Delta comparison is excluded by D25.
-  2. `NARRATIVE`: Free-text multi-section editor capturing Technique, Findings, Impression, and Recommendations (e.g. Chest X-Ray, ECG).
+  2. `NARRATIVE`: Free-text multi-section editor capturing Findings, Impression, and Comments (`results.findings`, `results.impression`, `results.comments`; e.g. Chest X-Ray, ECG).
   3. Structured `ULTRASOUND`: Organ-by-organ breakdown (Liver, Gallbladder, Biliary Tree, Spleen, Pancreas, Kidneys, Urinary Bladder, Pelvic Organs) with organ-specific findings and consolidated Impression.
 - **Automatic Result Flag Calculation Engine:**
   - Evaluates numeric component values against configured reference bounds: `LOW` (below ref_min), `HIGH` (above ref_max), `CRITICAL` (below critical_min or above critical_max), or `NORMAL` (within ref_min and ref_max).
@@ -699,15 +701,15 @@ Following user manual insertion of 1,200+ diagnostic tests into the PostgreSQL `
   - Full test suite passes 100% in both modes (35 passed, 0 failed).
 
 ### 2. Current State & Known Limitations
-- Current migration head: `a7d834bc912e` (single head, 25 domain tables + 1 alembic_version = 26 tables).
-- Endpoints: 62 unique paths / 72 operations registered under `/api/v1/`.
+- Migration head at Prompt 07C: `a7d834bc912e` (single head; at that point 25 domain tables + 1 `alembic_version` = 26 tables). **Current (verified in Prompt 10C):** head `b9e41d82f05a`, **27 domain tables + `alembic_version` = 28**, matching `docs/DATABASE.md`. Prompt 09 added `staff_roles` and `auth_sessions`.
+- Endpoints at Prompt 07C: 62 unique paths / 72 operations. **Current:** 69 paths / 79 operations.
 - Deferred features:
   - Sex/age-band reference range versioning (D24).
   - Barcode scan direct-open in worklist (M11.4).
   - Invoice detail auto-refresh on order updates.
   - Imaging lock timing alteration (scan completion vs result completion) and Owner emergency unlock (D13/D14).
   - Centralized configurable permission/role settings table.
-  - Module 14: Draft to Final report publishing, verification, and PDF delivery.
+  - Module 14: Draft to Final report (built in Prompt 16: explicit Finalize / automatic with the doctor approval, immutable stored content). Still open from it: PDF / print rendering, QR, real SMS.
 
 ---
 
@@ -719,7 +721,7 @@ Following user manual insertion of 1,200+ diagnostic tests into the PostgreSQL `
   - **Encapsulated Component:** Created `frontend/src/components/common/PatientHistoryModal.tsx` managing its own 4-tab clinical profile (Overview, Invoices & Tests, Payments, Dues) and nested invoice detail modal.
   - **In-Place Overlay:** Wired `PatientHistoryModal` into `InvoicesPage.tsx` so clicking "Patient History" displays an overlay directly over the invoices table with zero route switching (`/invoices` remains unchanged). Closing the modal cleans up query params without route disruption.
   - **PatientsPage Refactoring:** Refactored `frontend/src/features/patients/PatientsPage.tsx` to reuse `PatientHistoryModal`, eliminating ~350 lines of duplicate JSX drawer code.
-  - **Playwright Regression Suite:** Created `frontend/e2e/test_modal_regression.spec.ts` covering all 6 modal/drawer surfaces across roles (Invoices detail, Invoices->History, Patients history, Dues settlement, Ready Reports preview, Technician Worklist modals). All role switching is encapsulated in `selectDevRole`. 6 passed in 14.4s.
+  - **Playwright Regression Suite:** Created `frontend/e2e/test_modal_regression.spec.ts` covering all 6 modal/drawer surfaces across roles (Invoices detail, Invoices->History, Patients history, Dues settlement, Ready Reports preview, Technician Worklist modals). At Prompt 08 it ran 6 passed in 14.4s (historical). **Current status: failing, selector update pending.** The 2026-11-12 audit run gave 0 passed, 6 failed, because the spec fills `#username`/`#password` while the login page now uses `#user`/`#pass`. `selectDevRole` is now only a **login helper** inside this spec (stale name; the dev role switcher was removed in Prompt 09). `frontend/e2e/receptionist_corrections.spec.ts` also still has a stale "role switcher" comment. Fixing the specs is a separate coding task.
 - **Part B: Test Database Isolation & Hard Safety Guard:**
   - **Isolated Test Database:** Provisioned `medscope_test` owned by `medscope_app`.
   - **Hard Safety Guard:** Added `enforce_safety_guard` in `tests/conftest.py`. Compares normalized host, port, and database targets. If `TEST_DATABASE_URL` resolves to `medscope_dcms`, pytest immediately aborts with `pytest.UsageError` (Exit code 4).
@@ -774,14 +776,14 @@ Following user manual insertion of 1,200+ diagnostic tests into the PostgreSQL `
   - Functional `/login` page with Bento styling, 60-30-10 palette tokens, and clear lockout alerts.
   - Protected route wrapper redirecting unauthenticated users to `/login`.
   - Global 401 response interceptor clearing session and routing to `/login`.
-  - Role-based landing routes: Receptionist/Cashier -> `/invoices`, Lab Tech -> `/worklist`, Admin/Owner -> `/`.
+  - Role-based landing routes: Receptionist/Cashier -> `/invoices`, Lab Tech -> `/worklist`, Admin/Owner -> `/dashboard` (`/dashboard` since Prompt 10; see `frontend/src/utils/navigation.ts`).
 - **Automated Test Suite (Pure In-Process, Isolated):**
   - Rewrote fixtures in `tests/conftest.py` with deterministic test sessions and Argon2id test passwords.
   - Added `tests/test_prompt09_auth.py` (10 tests) covering login, wrong password, 5-attempt lockout, admin unlock, 401 unauthenticated, logout revocation, password change, acting role switch, real session role guards, and technician financial isolation.
   - Full test suite: **45 passed in 4.19s** against `medscope_test`. Zero writes to `medscope_dcms`.
 
 ### 2. Current State & Next Steps
-- Primary database (`medscope_dcms`): Upgraded to `b9e41d82f05a` (28 tables), untouched operational records (223 invoices), 0 test session rows.
+- Primary database (`medscope_dcms`): Upgraded to `b9e41d82f05a` (28 tables). Operational records were untouched by Prompt 09 (development/QA data; counts vary). 0 test session rows.
 - Next prompt: Completed Prompt 10. Ready for next prompt.
 
 ---
@@ -797,7 +799,7 @@ Following user manual insertion of 1,200+ diagnostic tests into the PostgreSQL `
 - **Operational Roles & Credential Provisioning:**
   - Initialized Argon2id credentials for all 4 diagnostic staff members in `medscope_dcms` (password: `12345`).
   - Active role assignments: `admin_tariq` (`ADMIN`, `OWNER`), `reception_fatima` (`RECEPTIONIST`, `CASHIER`), `tech_kamal` (`LAB_TECH`), `tech_nasrin` (`LAB_TECH`).
-  - Multi-role header switcher enables seamless toggling between Admin/Owner and Receptionist/Cashier without re-authentication.
+  - Multi-role header switcher enables seamless toggling between Admin/Owner and Receptionist/Cashier without re-authentication. *(Historical: removed in Prompt 10D — one login = one fixed role.)*
   - CLI [`backend/scripts/manage_users.py`](file:///d:/DMS/MedScope/backend/scripts/manage_users.py) enhanced with `--force` flag for administrative credential assignment.
 - **Animated Login Page (`/login`):**
   - Two-panel responsive layout (stacks vertically on mobile viewports).
@@ -805,7 +807,7 @@ Following user manual insertion of 1,200+ diagnostic tests into the PostgreSQL `
   - Right panel (Platinum `#E8E7E3` canvas): Centered white rounded container (`max-w-[420px]`), heading "Sign in", helper copy, real `<form>` with Username, Password with Show/Hide toggle, Persian Orange `#CF8852` full-width button (shows "Signing in…" when submitting), and inline `aria-live="polite"` error banner.
   - Calm, specific error messages: wrong credentials, locked account, session expired, network failure.
   - Helper links: "Forgot your password? Ask your center administrator to reset it." and "Back to the overview" link to `/`.
-- **Public Entry & Role Home Redirection (`getRoleHomeRoute`):**
+- **Public Entry & Role Home Redirection (`getRoleHomeRoute`) — historical; since Prompt 10D every role lands on `/dashboard`:**
   - Signed-in users who open `/` or `/login` are automatically redirected to their role's workbench (`/invoices` for Receptionist/Cashier, `/worklist` for Lab Tech, `/dashboard` for Admin/Owner).
   - Authenticated route `/dashboard` added for executive overview.
   - Unknown paths (`*`) render a branded 404 page (`NotFoundPage.tsx`) with "Back to home" / "Back to workbench".
@@ -813,7 +815,7 @@ Following user manual insertion of 1,200+ diagnostic tests into the PostgreSQL `
   - Installed and bundled `@fontsource/manrope` and `@fontsource/noto-sans-bengali`. Zero external CDN or Google Fonts requests.
   - Palette: Persian Orange `#CF8852` (accent), Platinum `#E8E7E3` (canvas), Dark Moss `#525333` (panels), ink `#26270F` (text), secondary `#3D3E1F`, white `#FFFFFF`. Button text on orange is ink `#26270F` (contrast ratio ~7:1).
   - Flat backgrounds only; no background gradients.
-  - Motion tokens: non-continuous curve `cubic-bezier(0.22, 1, 0.36, 1)`, linear marquee, and complete `@media (prefers-reduced-motion: reduce)` fallbacks.
+  - Motion tokens: non-continuous curve `cubic-bezier(0.22, 1, 0.36, 1)` and linear marquee. There is **no** `@media (prefers-reduced-motion: reduce)` fallback. It was removed on purpose in Prompt 10 so animations run on Windows machines with animations disabled. The owner has not yet decided on a "Pause animations" control.
   - Branded SVG favicon created from logo mark (`frontend/public/favicon.svg`).
 - **Limited Browser Exception (Playwright Chromium Screenshots):**
   - Automated script `frontend/scripts/capture_screenshots.mjs` captured 5 screenshots under `report/screenshots/`:
@@ -839,28 +841,206 @@ Following user manual insertion of 1,200+ diagnostic tests into the PostgreSQL `
   - Script path: [`backend/scripts/sql/cleanup_test_data.sql`](file:///d:/DMS/MedScope/backend/scripts/sql/cleanup_test_data.sql).
   - Designed for execution directly by the owner inside the **pgAdmin Query Tool** (pure standard SQL, zero `psql` meta-commands).
 - **Safety Guarantees & Evidence-Based Filtering:**
-  - Zero mutations performed directly against live `medscope_dcms` during implementation (read-only queries and dry-run transactional simulations only).
+  - Zero mutations were performed against `medscope_dcms` during the Prompt 10B implementation session (read-only queries and dry-run transactional simulations only). **Correction (Prompt 10C):** the owner later **executed and committed** the script on the main dev DB `medscope_dcms` on 2026-11-11 (audit log action `TEST_DATA_CLEANUP`, id 826). The on-disk file (git-ignored, local only) ends with `ROLLBACK;`, so it is not proven identical to the executed copy. It is a development/testing utility only: not schema, not part of the Alembic chain, not a product feature.
   - Strictly eliminated all range deletions (e.g. `invoices.id >= 6` is strictly prohibited); deletions rely 100% on evidence matching (exact test naming patterns, automated reason markers, and topological child cascading).
   - Protected entities: `staff`, `staff_roles`, `auth_sessions`, `tests` (1,250 tests), `test_components`, `test_destinations`, `business_days`, `sequence_counters`, `alembic_version`, 16 protected patients (12 seed + 4 QA: Jamila Begum, Waasi, Wasir beta, Wassir beti), 16 protected referrers (10 seed + 3 QA: Dr. Salehin, Asst. Prof. Dr. Arif Jawad, Rafiq, plus referrers 11, 31, 35 referenced by QA invoices), and 14 protected invoices (9 seed + 5 QA: SD-000031, SD-000066, SD-000099, SD-000135, SD-000136).
 - **Four Script Sections in Order:**
   - Section 1: Header comments, scope, protected entities, fresh custom `.dump` backup instructions in pgAdmin (warning against old Prompt 08 dump), and restore procedure.
   - Section 2: Configuration & PREVIEW (read-only): temp table `_cleanup_config` (`include_medium`, default `TRUE`), candidate temp tables per entity, preview summary result sets per table/tier, and list of kept protected entities.
   - Section 3: Deletion Transaction: `BEGIN;` followed by `DO $$ ... $$` executing deletions in topological order, emitting `RAISE NOTICE` for row counts per table, and inserting a single summary audit log `TEST_DATA_CLEANUP`.
-  - Section 4: Post-checks & Default ROLLBACK: automated orphan checks across all foreign keys, kept entity count assertions (16 patients, 16 referrers, 14 invoices), business day balance notice, ending with `ROLLBACK;` (switch to `COMMIT;` to persist).
+  - Section 4: Post-checks & Default ROLLBACK: automated orphan checks across all foreign keys, kept-entity count assertions (sized to the protected set at that time; dev/QA data, counts vary), business day balance notice, ending with `ROLLBACK;` (switch to `COMMIT;` to persist).
 - **Topological Deletion Sequence:**
   `audit_logs` -> `reprint_logs` -> `report_deliveries` -> `report_versions` -> `result_items` -> `results` -> `samples` -> `assignment_history` -> `test_order_events` -> `refund_requests` -> `test_orders` -> `payments` -> `invoice_lines` -> `invoices` -> `visits` -> `referrers` -> `patients` -> `audit_logs` summary insert.
 - **Cash Drawer & Business Day Policy:**
-  Recomputation of Day 2 stored cash received (70,430 Taka) diverges from raw payment sum (72,830 Taka) by 2,400 Taka due to historical pre-seeded floats/untracked adjustments. Per Prompt 10B rules, balances are left **untouched** with a warning notice printed in script output.
+  Stored business-day cash received already diverged from the raw payment sum at Prompt 10B time (historical pre-seeded floats/untracked adjustments). Per Prompt 10B rules, the script leaves balances **untouched** and prints a warning notice. Since the cleanup was committed, the dev DB drawer/channel balances are stale relative to the remaining payments (reconciliation pending).
 - **Candidate Elimination Counts:**
-  - With `include_medium = TRUE` (default): Deletes 135 patients, 115 referrers, 209 invoices, 209 visits, 218 invoice lines, 151 payments, 218 test orders, 153 events, 155 assignments, 29 samples, 3 results, 0 result items, 0 report versions, 0 report deliveries, 78 refund requests, 48 reprint logs, 587 audit logs.
-  - Preserves exactly: 16 patients, 16 referrers, 14 invoices, 14 visits, 48 invoice lines, 15 payments, 48 test orders, 16 events, 23 assignments, 9 samples, 2 results, 0 result items, 6 report versions, 4 report deliveries, 2 refund requests, 44 reprint logs, 72 audit logs.
+  Point-in-time counts are in the historical Prompt 10B report and in the `after_value` of audit row id 826. They are not repeated here because dev/QA data counts vary.
 - **Rehearsal Database Boundary:**
   Attempted `CREATE DATABASE medscope_cleanup_rehearsal`. PostgreSQL user `medscope_app` lacks `CREATEDB` privilege (`permission denied to create database`). Formally reported as **Blocked** per Prompt 10B Section 5 clause. Script verified via transactional dry-run simulation and static catalog validation.
+
+---
+
+## Prompt 10C — Docs vs Code Mismatch Fix & Owner Decisions (2026-11-13)
+
+Documentation-only prompt. No product code, tests, migrations or database changed. Full record: `report/PROMPT_10C_IMPLEMENTATION_REPORT.md`.
+
+### 1. Corrections (docs now match code)
+- Narrative result fields are **Findings, Impression, Comments** (`backend/app/models/result.py`).
+- No `prefers-reduced-motion` fallback exists. It was removed on purpose in Prompt 10. A "Pause animations" control is an open owner decision.
+- `selectDevRole` is only a stale-named login helper in `frontend/e2e/test_modal_regression.spec.ts`. That suite is **currently failing** (stale `#username`/`#password` selectors; selector update pending).
+- Current schema: 27 domain tables + `alembic_version` = 28. Single Alembic head `b9e41d82f05a`. API: 69 paths / 79 operations.
+- Exact dev-data record counts were generalized (development/QA data; counts vary).
+- The test-data cleanup script was executed and committed by the owner on `medscope_dcms` on 2026-11-11 (audit `TEST_DATA_CLEANUP`, id 826). It is a dev/testing utility only.
+- Schema policy: all DDL goes through Alembic migrations only. The Alembic head is the single source of truth. Seed/cleanup scripts are outside that chain.
+- D15 refund: the refundable amount must not exceed what was actually paid. *(At 10C a known issue; fixed in Prompt 10D.)*
+
+### 2. Owner decisions (ADL-032 to ADL-037 in `docs/ARCHITECTURE.md`) — implemented in Prompt 10D except Prompt 11 and the pre-go-live list
+- One login = one fixed role. No acting-role switching. Supersedes the Prompt 09 multi-role acting-role decision. The header switcher will be removed later.
+- Every login lands on the Dashboard (supersedes per-role home routes).
+- More roles/users (Owner, Cashier and others). One default LAB_TECH user per lab section/room.
+- "Create User" tab in the Owner/Admin panel with role assignment and per-user permission add/remove. This is the first step of the central configurable permission layer. Today CASHIER only shares the receptionist gate (`backend/app/core/security.py`, `backend/app/services/auth_service.py`).
+- Invoice "Save Draft" (keeps Draft) plus a separate "Finalize" (replaces "Save Invoice"). Today saving finalizes immediately.
+- Fix D15 refund logic (see above).
+- Work order: finish Prompt 10B related work, then Prompt 11 (soft delete/deactivate with confirm dialogs).
+- Pre-go-live cleanup list: `docs/TESTING.md` §12 (for later; not acted on).
+
+---
+
+## Prompt 10D — Routing Audit + Implementation of Decided Changes (2026-11-13)
+
+Full record: `report/PROMPT_10D_IMPLEMENTATION_REPORT.md`.
+
+### 1. Read-only routing audit (no routing change made)
+- No room model is used by routing. Rooms exist only as `test_destinations` rows and `tests.default_assignee` strings (seed: "Hematology Room 101", "Biochemistry Room 102", "Ultrasonography Room 204", "Microbiology Lab 105").
+- Invoice confirmation routes per line: doctor-routed → `AWAITING_DOCTOR`; outsourced → `PENDING`; `performing_role == 'LAB_TECH'` → first active LAB_TECH whose `department` equals the test department, else `UNASSIGNED`; any other `performing_role` → `default_assignee` text only (no technician).
+- Technicians see only orders with `assigned_to_id` = their id. Room 105 never reaches a technician (no Microbiology technician; the 187 imported microbiology tests use `performing_role` "Microbiologist" and have no default assignee).
+- "Awaiting Doctor" has no DOCTOR role or user; only Admin/Owner can complete it.
+
+### 2. Implemented
+- **Refunds:** refundable amount capped at the money paid for the line (deterministic proportional allocation — *replaced in Prompt 10E by `refund = max(0, retained paid − net after)`*). The missing `Invoice.refund_requests` relationship, which crashed disbursement, is fixed.
+- **Draft / Finalize:** `POST /invoices/drafts`, `PUT /invoices/{id}/draft`, `POST /invoices/{id}/finalize`; invoice number assigned at Finalize; drafts have no operational effect.
+- **One fixed role per login, Dashboard landing:** acting-role switching removed; dual-role accounts split (`cashier_fatima`, `owner_tariq`); a role-safe Dashboard for every role.
+- **Central permission layer:** `backend/app/core/permissions.py` with per-user overrides (`staff_permission_overrides`); the User Management page (`/users`) and `/api/v1/users` endpoints.
+- **Lab sections:** `staff.lab_section`; default LAB_TECH per section (`tech_kamal` 101, `tech_nasrin` 102, `tech_micro` 105, `tech_usg` 204).
+- **Playwright specs:** updated to the current login page and flows; the password is read from `MEDSCOPE_E2E_PASSWORD`.
+- **Migrations:** `c3d10a7f2b61`, `d7e5a91c4f02` (single head). Schema: 28 domain tables + `alembic_version` = 29. API: 79 paths / 92 operations. pytest: 80 passed. *(After Prompt 10E: head `f3c9a1d7e5b2`, 81 paths / 94 operations, 110 passed.)*
+
+### 3. Still open after 10D
+- Routing fixes (Room 105, room-based visibility, Doctor role) — **implemented in Prompt 10E** (below). Free-text `performing_role` normalization is still not done.
+- Reduced-motion "Pause animations" decision, Prompt 11 soft delete, and the pre-go-live credential cleanup (`docs/TESTING.md` §12) remain open.
+
+---
+
+## Prompt 10E — Room-Based Routing, Refund Rule, Invoice Payload, Payment Channels, Doctor Role and Worklist Fixes (2026-11-13)
+
+Full record: `report/PROMPT_10E_IMPLEMENTATION_REPORT.md`. Decision log: `docs/ARCHITECTURE.md` ADL-040 to ADL-047.
+
+### 1. Implemented
+- **Refund rule (ADL-040):** `net_after = net − line net` (floored at the urgent fee), `retained_paid = paid − approved/disbursed refunds`, `refund = max(0, retained_paid − net_after)`, `due = max(0, net_after − (retained_paid − refund))`. Server-computed; no refund and due together; never more than paid. The 10D proportional allocation is removed.
+- **Sample rule (ADL-046):** `backend/app/core/samples.py` `requires_sample`; imaging and "no sample" tests never block; "None"/"N/A" normalized to NULL.
+- **Invoice payload (ADL-043/044):** age (years/months/days) and gender required to Finalize (drafts may omit; no default age 30 / Male); urgent fee computed by the backend (`max(100, round(20% price))` per urgent line, never discounted, never refunded) stored in `invoices.urgent_fee`.
+- **Payment channels (ADL-042):** CASH, BKASH, NAGAD, ROCKET, POS_CARD, BANK_TRANSFER, OTHER (typed name in `payments.channel_detail`); frontend lists exactly these; missing business-day channel rows created safely.
+- **Roles (ADL-045, ADL-038 update):** LAB_TECH has `profile.manage`; CASHIER lost `report.release_with_due` (release with a due needs Admin/Owner + reason); DOCTOR role (doctor queue, completes doctor-routed tests, money-restricted like LAB_TECH); new keys `worklist.reassign`, `worklist.doctor_queue` (35 keys, 20 money).
+- **Room-based routing (ADL-041):** `tests.lab_section` + `test_orders.lab_section`; mapping in `backend/app/core/lab_sections.py`; every technician of a room sees its orders; empty rooms → UNASSIGNED, released when a technician joins; `worklist.reassign` moves orders until COMPLETED; Assign Tests stores room names; a LAB_TECH must have a room; `backend/scripts/reroute_orders_to_rooms.py` re-routed the dev DB (34 orders).
+- **Worklist (ADL-047):** Bento tiles are filters; Ready Reports filter (COMPLETED + ENTERED result — *Ready redefined in Prompt 10F*); Preview Report for a saved result; Reassign Room action.
+- **Migrations:** `e8b2f4a6c1d3`, `f3c9a1d7e5b2` (single head `f3c9a1d7e5b2`). Still 28 domain tables + `alembic_version`. API 81 paths / 94 operations. pytest 110 passed. Dev DB backup `backups/medscope_dcms_pre_prompt10e.dump`. *(After Prompt 10F: 85 paths / 98 operations, 122 passed, head unchanged.)*
+
+### 2. Still open / deferred
+- Module 15 (corrections / new report versions), PDF / print rendering, QR codes and real SMS are not built. Module 14 (Draft to Final) is built (Prompt 16).
+- `performing_role` normalization; 671 catalog tests map to no room; a reject / send-back path for the doctor sign-off (not decided).
+- Reduced-motion "Pause animations" decision, Prompt 11 soft delete, pre-go-live credential cleanup.
+- Playwright specs updated but not run in 10E (`MEDSCOPE_E2E_PASSWORD` not set; receptionist spec creates records).
+
+---
+
+## Prompt 10F — Owner Browser Findings (#1–#3) + A5 Sample Rule + A11 Empty Room (2026-11-13)
+
+Full record: `report/PROMPT_10F_IMPLEMENTATION_REPORT.md`. Decision log: `docs/ARCHITECTURE.md` ADL-048 to ADL-051. **Current phase: 10F done (reported). Next step: owner browser acceptance (`docs/TESTING.md` §13.3), then the next fix round or Prompt 11 (reserved, not started).**
+
+### 1. What was done
+- **F1 Assigned Tests view (ADL-048):** new **Assigned Tests** tab on the existing Assign Tests page (`/assignments`), backed by the money-free `GET /assignments/orders` (invoice, patient, test, room, active technician names or UNASSIGNED, status, urgent, created time; room/status filters + search). Receptionist/Cashier view only (reassign call → 403); Admin/Owner get **Reassign Room** through the existing `POST /worklist/{id}/reassign` until COMPLETED (409 after; 10F also 409 for cancelled / Not Performed, one rule `reassign_block_reason`). No new permission key (35 keys unchanged).
+- **F2 Preview after save (ADL-049):** new read-only `GET /worklist/{id}/result-preview` (room access) and `GET /reports/ready/{id}/preview` (`report.view`) from the stored result snapshots; available for DRAFT and ENTERED right after save (a "Result saved…" strip keeps Preview visible even when the row leaves the active tab); DRAFT previews carry a "DRAFT, not a final report" banner; no print/finalize/signature/QR/SMS/`report_versions` (Module 14 untouched). Root causes: actions were gated on `status !== 'COMPLETED'` only, and Ready required COMPLETED.
+- **F3 One Ready definition (ADL-049):** `ready_report_service.ready_clause()` — result ENTERED, order not cancelled, not Not Performed, not AWAITING_DOCTOR; **operational Complete not required** (owner expectation, recorded as an assumption). Drives the Lab tile count (SQL on the same visible set), the Lab Ready tab/tile list, the row flag and the new sidebar `GET /reports/ready` (all rooms; due fields only for money-permitted roles). `/reports` now opens on a **Ready Results** tab with Preview; empty states corrected. Root cause of the empty sidebar list: it read only `report_versions`, which nothing creates (Module 14).
+- **F4 A5 sample rule (ADL-050):** `backend/app/core/samples.py` rewritten — imaging never needs a sample (Ultrasonography room / imaging departments / NARRATIVE template; `requires_doctor` alone no longer counts); explicit `None`/`N/A`/`NA`/`No sample` means no sample; **NULL/empty `sample_type` on a non-imaging test requires a sample**. Gates: result template (400), result save DRAFT+ENTERED (409), Complete (400), **new:** culture stage (400) and outsourced SENT (400), all with the plain message "Take the sample before …". No catalog data touched (the owner fills `sample_type`); existing orders/locks unchanged (legacy completed-without-sample orders show "Completed without sample").
+- **F5 A11 empty room (ADL-051):** one routine (`routing_service.apply_technician_room_change` → `demote_assigned_orders_if_room_empty`) runs in the same transaction on every path that can empty a room (deactivate, room change, role change, CLI `assign-role`): assigned-only orders (status ASSIGNED, no sample, no result, no culture/outsourced step) become UNASSIGNED (room kept, audit `ORDER_UNASSIGNED_ROOM_EMPTY` + event + assignment-history row); progress states untouched; the existing release on adding a technician verified. Transaction fix: `revoke_all_user_sessions` no longer commits mid-change for user-management calls.
+- **Validation (real):** pytest **122 passed** (`medscope_test` only; +12 in `tests/test_prompt10f_owner_findings.py`); `tsc -b` 0; oxlint 0 errors / 120 warnings (baseline); `vite build` ok; `alembic heads`/`check` clean — **no schema change**; OpenAPI **85 paths / 98 operations**. Playwright **not run** (spec A5 updated for the `/reports` tabs; `--list` parses 12 tests).
+
+### 2. Still open after 10F
+- Owner browser acceptance of F1–F5 (checklist `docs/TESTING.md` §13.3); data readiness: the owner fills `tests.sample_type` (until then NULL non-imaging = sample required, §13.2).
+- Everything in the 10E "still open" list above (`performing_role`, 671 unmapped tests, reduced motion, Prompt 11, credential cleanup).
 
 ---
 
 ## Mandatory Phase-End Documentation Update Clause
 At the end of every prompt execution and at the conclusion of each development phase, the agent MUST review and update the relevant canonical documentation files (`project-context.md`, `docs/SCOPE.md`, `docs/ARCHITECTURE.md`, `docs/DESIGN.md`, `docs/API.md`, `docs/WORKFLOWS.md`, `docs/DATABASE.md`, `docs/TESTING.md`, `README.md`). Any newly created endpoints, updated database schemas, altered workflows, UI changes, or testing results must be reflected in these canonical documents before concluding the prompt. Redundant or duplicate narrative markdown files must not be created; all architectural and operational knowledge must reside strictly within these nine canonical files.
 
+## Prompt 11 — Soft Delete, Draft Discard, Confirm Dialog, Audit Viewer (2026-11-13)
 
+Full record: `report/PROMPT_11_IMPLEMENTATION_REPORT.md`. Decision log: `docs/ARCHITECTURE.md` ADL-052 to ADL-055. **Current phase: Prompt 11 done (reported). Next step: owner browser acceptance (`docs/TESTING.md` §14.3).**
 
+- Soft delete (`deleted_at`, `deleted_by_id`, `delete_reason`) on `staff`, `referrers` (doctors + 3rd parties), `tests`; migration `a4d8c2e6f1b7` (single head, was `f3c9a1d7e5b2`). User delete is separate from deactivate (deleted users are also forced inactive).
+- Draft Invoice discard = real delete (`DELETE /invoices/{id}/draft`), audit row survives.
+- One shared `ConfirmDialog`; `Catalog & Deleted` page; read-only `Audit Log` page (`audit.view`, slice of Module 23).
+- Counts: pytest **135 passed**; OpenAPI **96 paths / 110 operations**; **38 permission keys (21 money)**.
+- `medscope_test`: 98 stray LAB_TECH fixtures soft-deleted. Still open: Module 23 remainder, `performing_role`, 671 unmapped tests, reduced motion, credential cleanup.
+
+## Prompt 12 — Imaging Lock, Invoice Refresh, Fixture Cleanup (2026-11-13)
+
+Full record: `report/PROMPT_12_IMPLEMENTATION_REPORT.md`. Decision log: `docs/ARCHITECTURE.md` ADL-056, ADL-057. **Current phase: Prompt 12 done (reported). Next step: owner browser acceptance (`docs/TESTING.md` §15.2).**
+
+- No-sample/imaging lines lock at **result completion**; `IMAGING_PERFORMED` is a status label only. Owner same-day line unlock `POST /invoices/lines/{id}/unlock` (`invoice.line_unlock`, Owner only).
+- Invoices list/detail refetch after Sample Taken (event, focus, 30 s while a detail is open).
+- `medscope_test` fixture users are purged at the end of every pytest session (`tests/fixture_cleanup.py`); staff count stays at 8 seeds.
+- `audit.view` default documented: Owner yes, Admin no (grantable). M11.4 barcode open: deferred by owner decision.
+- Counts: head `a4d8c2e6f1b7` (no schema change), pytest **141 passed**, OpenAPI **97 / 111**, **39 permission keys (21 money)**.
+
+## Pre-Lock Cancellation, Separate Disbursement and Business Day Status (Prompts 13, 13A, 13B; 2026-11-14)
+
+Records: `report/PROMPT_13_IMPLEMENTATION_REPORT.md`, `report/PROMPT_13A_IMPLEMENTATION_REPORT.md`, `report/PROMPT_13B_IMPLEMENTATION_REPORT.md`. Decision log: `docs/ARCHITECTURE.md` ADL-058 to ADL-066. Owner decisions: `docs/SCOPE.md` §8.
+
+- **Cancel (no approval):** Receptionist, Cashier, Admin and Owner cancel one unlocked line (**Cancel Test**) or every remaining line when none is locked (**Cancel Whole Invoice**) at once. The refund amount is never typed: `compute_cancellation_outcome` feeds the read-only breakdown (`GET /refunds/preview/{line}`, `GET /refunds/preview-invoice/{invoice}`).
+- **Cancelling never pays out:** the refund is left `APPROVED` (or `COMPLETED` when 0) and is paid through the separate Disburse step (`refund.disburse`); the invoice shows "Refund pending payout [Disburse now]".
+- **Locked line:** 409 `SAMPLE_ALREADY_TAKEN` + "Sample already taken" dialog; post-lock stays the Lab Tech D15 path with Admin/Owner approval. Imaging-started cancellation and owner same-day unlock also keep their approval.
+- **Line state derived (no column):** `NONE`, `CANCELLATION_REQUESTED`, `CANCELLED_REFUND_PENDING`, `CANCELLED`, `CANCELLED_REFUNDED`; `display_status` beats the sample label.
+- **Business Day:** every role, including Lab Tech, reads the same open/closed state from the money-free `GET /business-day/state`.
+- No new permission key. Test infrastructure: staff and referrer fixtures purged at session end.
+
+## Prompt 14 — Reference Ranges Versioned by Sex and Age Band (D24, 2026-11-14)
+
+Full record: `report/PROMPT_14_IMPLEMENTATION_REPORT.md`. Decision log: `docs/ARCHITECTURE.md` ADL-067, ADL-068. Rules: `docs/SCOPE.md` §9. Owner browser acceptance: `docs/TESTING.md` §16.2 and §17.2.
+
+- New table `reference_range_versions` (migration `b7e3d91c5a24`, head before `a4d8c2e6f1b7`): bands by sex (`ANY`/`MALE`/`FEMALE`) and age in days; a change is a new version, rows are never edited or deleted. The old single range columns on `test_components` were dropped after being carried forward as version 1 (dev DB 26 -> 26 verified; `backups/medscope_dcms_pre_prompt14.dump` taken first).
+- Result entry converts entered age + visit date to total days, picks the band (sex band, else any-sex band, else `NO_BAND` flagged for manual review, never a guess) and snapshots range, critical limits, band version id and match type onto the result item. Saved results never change.
+- Admin/Owner manage bands in Catalog & Deleted → Reference ranges (`test_catalog.manage`, no new key).
+- Counts: pytest **180 passed / 0 failed** (twice), OpenAPI **106 / 120**, **39 permission keys (21 money)**, single head `b7e3d91c5a24`.
+
+## Prompt 15 — Doctor Sign-off Screen (D22, 2026-11-14)
+
+Full record: `report/PROMPT_15_IMPLEMENTATION_REPORT.md`. Decision log: `docs/ARCHITECTURE.md` ADL-069. Rules: `docs/SCOPE.md` §10. Workflow: `docs/WORKFLOWS.md` §13. Owner browser acceptance: `docs/TESTING.md` §18.2.
+
+- New table `doctor_approvals` (migration `c9a4e7b2d815`, head before `b7e3d91c5a24`) plus nullable `staff.doctor_profile_id` and `test_orders.assigned_doctor_id` (both FK to `referrers`). One approval per test order; stores who clicked, the attributed doctor (name + registration snapshot), `is_attestation`, notes, time. `backups/medscope_dcms_pre_prompt15.dump` taken before applying to `medscope_dcms`.
+- Screen `/doctor-approvals` ("Doctor Sign-off"): Admin/Owner approve on a doctor's behalf (doctor picker + attestation) and assign orders to doctors; a DOCTOR login approves its own assigned orders. Approval moves the order to the existing `COMPLETED` status. Audit actions `DOCTOR_APPROVED_OWN_RESULT` / `DOCTOR_APPROVAL_RECORDED_BY_STAFF` / `DOCTOR_APPROVAL_ASSIGNED`. A DOCTOR user is linked to a doctor profile in User Management.
+- No new permission key (`result.complete_doctor_routed`). Not built: reject / send-back. Since Prompt 16 an approval also finalizes the report.
+- Counts: pytest **202 passed / 0 failed**, OpenAPI **110 / 124**, **39 permission keys (21 money)**, single head `c9a4e7b2d815`, 31 tables.
+
+## Prompt 16 — Module 14: Draft to Final Report (2026-11-14)
+
+Full record: `report/PROMPT_16_IMPLEMENTATION_REPORT.md`. Decision log: `docs/ARCHITECTURE.md` ADL-070, ADL-071. Rules: `docs/SCOPE.md` §11. Workflow: `docs/WORKFLOWS.md` §14. Owner browser acceptance: `docs/TESTING.md` §19.2.
+
+- The `report_versions` table already existed (seeded, used by delivery and the Issued Reports tab), so it was **extended** (migration `d2b6f8a1c439`): `result_id`, `approval_rule`, `doctor_approval_id`, `content_snapshot` (JSON), `signatures` (JSON). `status = FINAL_AUTHORIZED` is the Final state; `issued_at` / `issued_by_id` are the finalization time and user. Draft = a result with status DRAFT (no report row). One Final report per test order (partial unique index). Stored content is immutable (ORM guard plus a database trigger). New `notification_log` (placeholder rows `PENDING_INTEGRATION`; **nothing is sent**), `results.updated_by_id`.
+- Who finalizes: technician-final = explicit **Finalize report** (preview modal; `POST /worklist/{id}/finalize-report`, key `result.enter`); doctor-required and both-signature = automatically in the doctor-approval transaction (both-signature needs the technician sign-off and the doctor approval); cultures also wait for stage FINAL. `COMPLETED` remains an operational status, never "Final".
+- A Final report leaves Ready and appears in Issued Reports; **View result** shows the stored snapshot (`GET /reports/{id}/snapshot`). Result save is refused after a Final report or a doctor approval; a stale-edit check (`expected_updated_at`) returns 409.
+- No new permission key. Not built: corrections (Module 15), signature image upload, PDF / print, QR, real SMS, auto-save (the result modal has none).
+- Counts: pytest **222 passed / 0 failed**, OpenAPI **112 / 126**, **39 permission keys (21 money)**, single head `d2b6f8a1c439`, 32 tables.
+
+## Prompt 17 — Module 17 (Handover) and Module 18 (Dues) (2026-11-14)
+
+Full record: `report/PROMPT_17_IMPLEMENTATION_REPORT.md`. Decision log: `docs/ARCHITECTURE.md` ADL-072 to ADL-074. Rules: `docs/SCOPE.md` §12 (with the module coverage table). Workflow: `docs/WORKFLOWS.md` §15.
+
+- **What already existed (not rebuilt):** `report_deliveries` (staff, time, recipient, released-with-due flag and reason), the due-hold rule with the Admin/Owner override reason, the printable report with a reprint log and Duplicate flag, the Dues page and the payment flow. Module 17 was therefore mostly built; the gaps were a center setting, search fields, the due filter, inline payment on the handover screen and a reprint log that was never committed (fixed).
+- **New:** table `tenant_settings` (owner-editable: `report_hold_when_due` default on, `writeoff_admin_limit` default 500; no settings mechanism existed before), `due_writeoffs` (separate bad-debt record), `invoices.written_off`, `doctor_balance_entries` (source rows for the two doctor balances; nothing writes them yet because Modules 20 / 28 are not built). Migration `e5d7a2c9b138`; `pg_dump` taken first (`backups/medscope_dcms_pre_prompt17.dump`).
+- **Dues:** age buckets 0-7 / 8-30 / 31-90 / 90+ days derived from the bill date, call list, write-off (Admin within the limit per bill in total, Owner any amount, above-limit Admin request waits for the Owner; never a discount), doctor balances (wholesale receivable and professional-fee payable kept apart).
+- **New permission keys (3):** `settings.manage` (Owner), `due.writeoff` (Admin, Owner; money), `doctor_balance.view` (Admin, Owner; money). Not built: SMS reminders, corporate dues, online viewing / courier, payouts (M20), accounting postings (M21 / 22), promised-date notes.
+
+## Prompt 18 — Module 21 (Accounting) and Module 22 (Day Open / Close) (2026-11-14)
+
+Full record: `report/PROMPT_18_IMPLEMENTATION_REPORT.md`. Decision log: `docs/ARCHITECTURE.md` ADL-075 to ADL-077. Rules: `docs/SCOPE.md` §13 (with the module coverage table). Workflow: `docs/WORKFLOWS.md` §16. **Current phase: Prompt 18 done (reported). Next step: the separate verification prompt, then owner browser acceptance (`docs/TESTING.md` §21.2).**
+
+- **What already existed (reused):** the business-day table with opening float, per-channel balances (with unused `closing_counted` / `variance` columns), the cash drawer effect of payments and cash refunds, `POST /business-day/open`, the money-free `GET /business-day/state` (unchanged), the Admin/Owner-only `business_day.close` key, the Prompt 17 dues list and write-off, `tenant_settings`. Nothing resembling a journal or ledger existed in the API.
+- **New tables:** `accounts`, `journal_entries`, `journal_lines` (append-only and balanced, enforced by database triggers), `day_movements`; five nullable `business_days` columns (`closing_expected_cash`, `variance_reason`, `reopened_at`, `reopened_by_id`, `reopen_reason`); day status `REOPENED`. Migration `f9a2c4d6e8b1`; `pg_dump` taken first (`backups/medscope_dcms_pre_prompt18.dump`). The journal is **not backfilled**: it starts at deployment; earlier bills and payments have no entries.
+- **Postings:** only what really happens (see `docs/SCOPE.md` §13). Deferred, no postings: commission accrued / reversed / paid, visit-fee handover, consultant fee, outside-lab cost.
+- **Day close (D45 to D48):** expected cash = opening cash + cash collections - cash refunds - bank deposits - owner withdrawals - small expenses; the four payout kinds of unbuilt modules are 0 and shown as such; write-offs are not cash. Counted cash required; variance reason above the `cash_variance_tolerance` setting (default 0); no-unsynced-items always passes; Owner-only reopen with a reason, then adjusting entries only; close stays Admin/Owner.
+- **New permission key (1):** `accounting.view` (Admin, Owner; money). Counts: pytest **284 passed / 0 failed** (Prompt 18B fixes and Prompt 19 included), OpenAPI **129 / 144**, **43 permission keys (24 money)**, single head `f9a2c4d6e8b1`, 39 tables.
+
+## Prompt 19 — Doctor / 3rd-party Edit (2026-11-14)
+
+Full record: `report/PROMPT_19_IMPLEMENTATION_REPORT.md`. Before it, **no edit existed anywhere** for an existing doctor / 3rd party (only create and soft delete); no rate-card mechanism exists in the repository either. Added `PATCH /referrers/{id}` (key `referrer.manage`, the same as delete; no new key, no schema change) and an **Edit** button with a modal on Catalog & Deleted > Doctors & 3rd parties. Commission is neither shown nor edited. Saved doctor approvals keep their own name / registration snapshot. Counts: OpenAPI 129 / 144, pytest 284 passed, head unchanged `f9a2c4d6e8b1`.
+
+## Prompt 19B — Module 23 Audit Trail (built; owner browser acceptance pending)
+
+Full record: `report/PROMPT_19B_AUDIT_TRAIL_BUILD_REPORT.md`; discovery: `report/PROMPT_19_AUDIT_TRAIL_DISCOVERY_REPORT.md`.
+- **One audit log, append-only.** `audit_logs` is the only audit store; database triggers (migration `a19b5c7d9e31`) refuse UPDATE, DELETE and TRUNCATE. `reprint_logs` was folded in (49 legacy rows copied with role `UNKNOWN`) and dropped. The test-data cleanup script is gone from the repo. Kept forever; no purge logic.
+- **New events:** `INVOICE_DISCOUNT_CHANGED` / `INVOICE_DISCOUNT_CONFIRMED`, `INVOICE_INITIAL_PAYMENT`, `REPORT_VIEWED`, `REPORT_PREVIEW_VIEWED` (entity id is the test order), `INVOICE_REPRINTED` / `REPORT_REPRINTED`, `AUDIT_LOG_EXPORTED`. Stock stays a stub (no inventory module). No catalog-test edit endpoint exists.
+- **Viewer (`audit.view`, unchanged):** domain, action, entity, person, role, date filters; free-text search; CSV export of the current filters that audits itself.
+- **Vendor / session log deferred** (no subject in this system; dated decision in `docs/SCOPE.md` section 15). No JSON before / after column or action registry.
+- **Counts:** pytest **297 passed / 0 failed**, OpenAPI **130 / 145**, 43 permission keys (24 money, no new key), single head `a19b5c7d9e31`, 38 tables.

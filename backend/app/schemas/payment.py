@@ -7,15 +7,17 @@ from backend.app.schemas.common import BaseSchema
 class PaymentCreate(BaseModel):
     invoice_id: int
     amount: int = Field(..., gt=0, description="Payment amount in whole Taka")
-    method: str = Field(default="CASH", description="CASH, BKASH, NAGAD, BANK_TRANSFER, POS_CARD")
+    method: str = Field(default="CASH", description="CASH, BKASH, NAGAD, ROCKET, POS_CARD, BANK_TRANSFER, OTHER")
     reference: Optional[str] = Field(default=None, description="Transaction ID or voucher reference")
+    channel_detail: Optional[str] = Field(default=None, max_length=100, description="Channel name, required when method is OTHER")
     cash_tendered: Optional[int] = Field(default=None, ge=0, description="Amount handed by patient for change calculation")
 
 
 class DueSettlementRequest(BaseModel):
     amount: int = Field(..., gt=0)
-    method: str = Field(default="CASH")
+    method: str = Field(default="CASH", description="CASH, BKASH, NAGAD, ROCKET, POS_CARD, BANK_TRANSFER, OTHER")
     reference: Optional[str] = None
+    channel_detail: Optional[str] = Field(default=None, max_length=100, description="Channel name, required when method is OTHER")
     cash_tendered: Optional[int] = None
 
 
@@ -25,6 +27,7 @@ class PaymentResponse(BaseSchema):
     amount: int
     method: str
     reference: Optional[str] = None
+    channel_detail: Optional[str] = None  # Prompt 10E: name typed for OTHER
     change_amount: int
     received_at: datetime
     received_by_id: int
@@ -43,6 +46,10 @@ class DueInvoiceSummary(BaseSchema):
     paid: int
     due: int
     payment_status: str
+    # Prompt 17 (Module 18): derived age of the bill and the amount already written off
+    age_days: int = 0
+    age_bucket: str = "0-7"
+    written_off: int = 0
 
     # UI aliases
     id: Optional[str] = None

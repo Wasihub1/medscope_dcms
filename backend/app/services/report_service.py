@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 from fastapi import HTTPException, status
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from sqlalchemy.orm import Session
 from backend.app.models.report import ReportVersion, ReportDelivery
 from backend.app.models.test_order import TestOrder
@@ -11,8 +11,10 @@ from backend.app.schemas.report import (
     DeliverableReportResponse,
     ReportDeliveryRequest,
     PrintableReportData,
+    ResultPreviewResponse,
 )
-from backend.app.services.audit_service import log_audit_event, log_reprint_event
+from backend.app.services import settings_service
+from backend.app.services.audit_service import count_reprints, log_audit_event, log_reprint_event
 
 
 def list_deliverable_reports(
@@ -21,8 +23,11 @@ def list_deliverable_reports(
     query: Optional[str] = None,
     delivery_status: Optional[str] = None,
     limit: int = 50,
+    has_due: Optional[bool] = None,
 ) -> List[DeliverableReportResponse]:
-    """Lists authorized reports with due status and delivery state."""
+    """Lists authorized reports with due status and delivery state. Prompt 17: the search also finds the
+    patient number, test name and temporary bill number; is_held_due_to_balance follows the center setting."""
+    hold_enabled = settings_service.get_bool(db, tenant_id, "report_hold_when_due")
     stmt = (
         select(ReportVersion)
         .join(ReportVersion.test_order)
@@ -44,7 +49,15 @@ def list_deliverable_reports(
             | (Invoice.invoice_no.ilike(f"%{q}%"))
             | (Patient.name.ilike(f"%{q}%"))
             | (Patient.phone.ilike(f"%{q}%"))
+            | (Patient.patient_code.ilike(f"%{q}%"))
+            | (Invoice.temp_invoice_id.ilike(f"%{q}%"))
+            | (InvoiceLine.test_name_snapshot.ilike(f"%{q}%"))
+            | (InvoiceLine.test_code_snapshot.ilike(f"%{q}%"))
         )
+    if has_due is True:
+        stmt = stmt.where(Invoice.due > 0)
+    elif has_due is False:
+        stmt = stmt.where(Invoice.due <= 0)
 
     reports = list(db.execute(stmt.limit(limit)).scalars().all())
     results = []
@@ -76,10 +89,12 @@ def list_deliverable_reports(
                 issued_at=r.issued_at,
                 issued_by_name=r.issued_by.display_name if r.issued_by else None,
                 invoice_due=inv.due,
-                is_held_due_to_balance=inv.due > 0,
+                is_held_due_to_balance=hold_enabled and inv.due > 0,
                 is_delivered=is_delivered,
                 delivered_at=deliv.delivered_at if deliv else None,
                 delivered_to_name=deliv.delivered_to_name if deliv else None,
+                has_snapshot=r.content_snapshot is not None,
+                approval_rule=r.approval_rule,
             )
         )
 
@@ -116,11 +131,27 @@ def get_deliverable_report_by_id(
         issued_at=report.issued_at,
         issued_by_name=report.issued_by.display_name if report.issued_by else None,
         invoice_due=inv.due,
-        is_held_due_to_balance=inv.due > 0,
+        is_held_due_to_balance=settings_service.get_bool(db, tenant_id, "report_hold_when_due") and inv.due > 0,
         is_delivered=is_delivered,
         delivered_at=deliv.delivered_at if deliv else None,
         delivered_to_name=deliv.delivered_to_name if deliv else None,
+        has_snapshot=report.content_snapshot is not None,
+        approval_rule=report.approval_rule,
     )
+
+
+def get_final_snapshot(db: Session, tenant_id: str, report_version_id: int) -> ResultPreviewResponse:
+    """The stored content of a Final report, exactly as it was at finalization. Never rebuilt from the
+    live result or catalog, so later changes cannot alter it. Seeded pre-Module-14 reports have none (404)."""
+    report = db.get(ReportVersion, report_version_id)
+    if not report or report.tenant_id != tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report version not found.")
+    if report.content_snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This report was issued before report snapshots existed and has no stored result content.")
+    data = dict(report.content_snapshot)
+    data.update(report_status="FINAL", report_version_id=report.id, report_no=report.report_no,
+                can_finalize=False, finalize_blocker="This report is already Final.", signatures=report.signatures)
+    return ResultPreviewResponse(**data)
 
 
 def record_report_delivery(
@@ -130,6 +161,7 @@ def record_report_delivery(
     data: ReportDeliveryRequest,
     deliverer_id: int,
     acting_role: str = "RECEPTIONIST",
+    can_release_with_due: Optional[bool] = None,
 ) -> ReportDelivery:
     """Delivers report to patient/relation, strictly enforcing due-hold policies."""
     report = db.get(ReportVersion, report_version_id)
@@ -144,14 +176,25 @@ def record_report_delivery(
 
     invoice = report.test_order.invoice_line.invoice
     has_due = invoice.due > 0
+    # Prompt 17: the center setting. Off = a report is never held for due (nothing to override).
+    hold_enabled = settings_service.get_bool(db, tenant_id, "report_hold_when_due")
 
-    # Section 2.10 Due Hold Enforcement
-    if has_due:
-        # If receptionist, they cannot bypass due without an Admin override reason
-        if acting_role == "RECEPTIONIST" and not data.admin_due_override_reason:
+    # Section 2.10 Due Hold Enforcement (Prompt 10E Part 6):
+    # only holders of 'report.release_with_due' (ADMIN / OWNER by default) may release a report
+    # while a due exists, and only with an override reason. RECEPTIONIST and CASHIER are blocked,
+    # with or without a reason.
+    if has_due and hold_enabled:
+        if can_release_with_due is None:
+            can_release_with_due = acting_role in ("ADMIN", "OWNER")
+        if not can_release_with_due:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Report is held because invoice {invoice.invoice_no} has an outstanding due of Tk {invoice.due}. Receptionist cannot release without Admin/Owner override reason.",
+                detail=f"Report is held because invoice {invoice.invoice_no} has an outstanding due of Tk {invoice.due}. Only an Admin/Owner can release it, with an override reason.",
+            )
+        if not (data.admin_due_override_reason or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="An override reason is required to release a report while a due exists.",
             )
 
     delivery = ReportDelivery(
@@ -175,9 +218,33 @@ def record_report_delivery(
         entity_id=report.id,
         acting_role=acting_role,
         actor_id=deliverer_id,
-        after_value=f"Delivered to: {delivery.delivered_to_name} ({delivery.delivered_to_relation}), Due Override: {has_due}",
+        after_value=(f"Handed over to: {delivery.delivered_to_name} ({delivery.delivered_to_relation}), invoice due Tk {invoice.due}"
+                     + (f", released despite due (hold on), reason: {delivery.due_release_reason}" if has_due and hold_enabled
+                        else (", hold setting off" if has_due else ""))),
     )
     return delivery
+
+
+def log_report_view(db: Session, actor, report_version_id: int, via: str) -> None:
+    """Prompt 19B: one audit row for every open of a finalized report (no throttling, no dedupe).
+    Called only after the read succeeded, so a 404 leaves no row. `via` names the screen/endpoint."""
+    report = db.get(ReportVersion, report_version_id)
+    log_audit_event(
+        db=db, tenant_id=actor.tenant_id, action="REPORT_VIEWED", entity_type="REPORT", entity_id=report_version_id,
+        acting_role=actor.role, actor_id=actor.id,
+        after_value=f"Viewed report {report.report_no if report else '?'} v{report.version if report else '?'} ({via})",
+    )
+
+
+def log_ready_result_view(db: Session, actor, test_order_id: int) -> None:
+    """Prompt 19B: one audit row for every open of a ready-result preview (a saved result that is not yet a
+    Final report). entity_type is REPORT as specified; entity_id is the TEST ORDER id because no report
+    version exists yet, and the action name says so."""
+    log_audit_event(
+        db=db, tenant_id=actor.tenant_id, action="REPORT_PREVIEW_VIEWED", entity_type="REPORT", entity_id=test_order_id,
+        acting_role=actor.role, actor_id=actor.id,
+        after_value=f"Viewed ready-result preview of test order #{test_order_id} (entity_id is the test order id)",
+    )
 
 
 def get_printable_report_data(
@@ -185,6 +252,7 @@ def get_printable_report_data(
     tenant_id: str,
     report_version_id: int,
     actor_id: int,
+    acting_role: str,
 ) -> PrintableReportData:
     """Retrieves formatted report data and registers reprint audit."""
     report = db.get(ReportVersion, report_version_id)
@@ -196,13 +264,17 @@ def get_printable_report_data(
     inv = line.invoice
     pat = inv.patient
 
+    # Prompt 17: count earlier prints of this report first, so the copy is marked Duplicate from the second print on
+    prior_prints = count_reprints(db, tenant_id, "REPORT", report.id)
+
     # Log reprint event
     log_reprint_event(
         db=db,
         tenant_id=tenant_id,
         entity_type="REPORT",
         entity_id=report.id,
-        reprinted_by_id=actor_id,
+        actor_id=actor_id,
+        acting_role=acting_role,
         reason="Front desk report print/reprint request",
     )
 
@@ -221,7 +293,7 @@ def get_printable_report_data(
         findings_summary=report.findings_summary or "All parameters within evaluated normal physiological limits.",
         issued_at=report.issued_at,
         issued_by_name=report.issued_by.display_name if report.issued_by else "Clinical Laboratory Staff",
-        is_duplicate=len(report.deliveries) > 0,
-        reprint_count=1,
+        is_duplicate=len(report.deliveries) > 0 or prior_prints > 0,
+        reprint_count=prior_prints + 1,
     )
 

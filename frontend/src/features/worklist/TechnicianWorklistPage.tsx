@@ -18,12 +18,17 @@ import {
   Check,
   AlertCircle,
   FileText,
+  Eye,
+  MoveRight,
+  FileCheck,
+  Inbox,
 } from 'lucide-react';
 import { api } from '../../api/client';
 import {
   TechnicianWorklistItem,
   WorklistSummary,
   BarcodeLabelData,
+  LabRoom,
 } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -31,9 +36,14 @@ import { Modal } from '../../components/common/Modal';
 import { SampleBarcodeModal } from '../../components/common/SampleBarcodeModal';
 import { LifecycleHistoryModal } from '../../components/common/LifecycleHistoryModal';
 import { ResultEntryModal } from '../../components/common/ResultEntryModal';
+import { ResultReportPreviewModal } from '../../components/common/ResultReportPreviewModal';
+import { WORKLIST_TILES, WorklistTileId, applyTile, isTileActive, tileCount } from './worklistTiles';
+import { useRefetchOnFocus } from '../../utils/useRefetchOnFocus';
 
 export const TechnicianWorklistPage: React.FC = () => {
-  const { role, staffName, department } = useAuth();
+  const { role, staffName, department, hasPermission } = useAuth();
+  const canReassign = hasPermission('worklist.reassign');
+  const canSeeAllRooms = hasPermission('worklist.view_all');
   const { showToast } = useToast();
 
   const [items, setItems] = useState<TechnicianWorklistItem[]>([]);
@@ -95,6 +105,58 @@ export const TechnicianWorklistPage: React.FC = () => {
   const [resultModalOpen, setResultModalOpen] = useState(false);
   const [submittingD15Refund, setSubmittingD15Refund] = useState(false);
 
+  // 9. Prompt 10E Part 9: report preview of a saved result
+  const [previewOrderId, setPreviewOrderId] = useState<number | null>(null);
+  // Prompt 10F (F2): the result just saved. Shown above the grid with a Preview action, because a
+  // submitted result can leave the active tab (e.g. Sample Pending -> Completed) right after save.
+  const [lastSaved, setLastSaved] = useState<{ id: number; testName: string; status: 'DRAFT' | 'ENTERED' } | null>(null);
+
+  // 10. Prompt 10E Part 7: reassign an order to another room (worklist.reassign)
+  const [rooms, setRooms] = useState<LabRoom[]>([]);
+  const [reassignModalOpen, setReassignModalOpen] = useState(false);
+  const [reassignRoom, setReassignRoom] = useState('');
+  const [reassignReason, setReassignReason] = useState('');
+  const [submittingReassign, setSubmittingReassign] = useState(false);
+
+  useEffect(() => {
+    if (!canReassign) return;
+    api.getRooms().then(setRooms).catch(() => setRooms([]));
+  }, [canReassign]);
+
+  // Prompt 10E Part 8: Bento tiles are filters (same effect as the status tabs)
+  const handleTileClick = (id: WorklistTileId) => {
+    const next = applyTile(id, { statusFilter, urgentOnly });
+    setStatusFilter(next.statusFilter);
+    setUrgentOnly(next.urgentOnly);
+  };
+
+  const handleOpenReassign = (order: TechnicianWorklistItem) => {
+    setActiveOrder(order);
+    setReassignRoom('');
+    setReassignReason('');
+    setReassignModalOpen(true);
+  };
+
+  const handleSubmitReassign = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeOrder || !reassignRoom) return;
+    setSubmittingReassign(true);
+    try {
+      const res = await api.reassignRoom(activeOrder.test_order_id, reassignRoom, reassignReason.trim() || undefined);
+      showToast({
+        type: 'success',
+        title: 'Order Reassigned',
+        message: `Order #${activeOrder.test_order_id} moved to ${res.lab_section_label || reassignRoom}.`,
+      });
+      setReassignModalOpen(false);
+      fetchData();
+    } catch (err: any) {
+      showToast({ type: 'error', title: 'Reassign Failed', message: err.message || 'Could not move the order.' });
+    } finally {
+      setSubmittingReassign(false);
+    }
+  };
+
   // Fetch data
   const fetchData = useCallback(async () => {
     try {
@@ -125,6 +187,16 @@ export const TechnicianWorklistPage: React.FC = () => {
     setLoading(true);
     fetchData();
   }, [fetchData]);
+
+  // Prompt 10F: refetch when the user returns to the window (e.g. an order was moved to this room)
+  useRefetchOnFocus(fetchData);
+
+  const handleResultSaved = (savedStatus?: 'DRAFT' | 'ENTERED') => {
+    if (activeOrder) {
+      setLastSaved({ id: activeOrder.test_order_id, testName: activeOrder.test_name, status: savedStatus || 'ENTERED' });
+    }
+    fetchData();
+  };
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -433,8 +505,25 @@ export const TechnicianWorklistPage: React.FC = () => {
     { id: 'CULTURE', label: 'Culture & Sensitivity', count: summary?.culture_count || 0 },
     { id: 'IMAGING', label: 'Imaging / USG', count: summary?.imaging_count || 0 },
     { id: 'OUTSOURCED', label: 'Outsourced Labs', count: summary?.outsourced_count || 0 },
+    { id: 'LATE', label: 'Late', count: summary?.late_count || 0 },
+    { id: 'READY', label: 'Ready Reports', count: summary?.ready_count || 0 },
     { id: 'COMPLETED', label: 'Completed', count: summary?.completed_count || 0 },
   ];
+
+  // Prompt 10E Part 8: visual style per tile (brand look kept)
+  const tileStyle: Record<WorklistTileId, { text: string; icon: React.ReactNode }> = {
+    ALL: { text: 'text-[#1B1B0E]', icon: <Activity className="w-3.5 h-3.5 text-[#525333]" /> },
+    URGENT: { text: 'text-[#B05B20]', icon: <span className="w-2 h-2 rounded-full bg-[#CF8852] animate-pulse" /> },
+    SAMPLE_PENDING: { text: 'text-[#8B6B23]', icon: <Droplet className="w-3.5 h-3.5 text-[#8B6B23]" /> },
+    IN_PROGRESS: { text: 'text-[#2B547E]', icon: <FlaskConical className="w-3.5 h-3.5 text-[#2B547E]" /> },
+    AWAITING_DOCTOR: { text: 'text-amber-800', icon: <Clock className="w-3.5 h-3.5 text-amber-700" /> },
+    REJECTED: { text: 'text-rose-700', icon: <XCircle className="w-3.5 h-3.5 text-rose-600" /> },
+    LATE: { text: 'text-rose-700', icon: <AlertTriangle className="w-3.5 h-3.5 text-rose-600" /> },
+    READY: { text: 'text-emerald-800', icon: <FileCheck className="w-3.5 h-3.5 text-emerald-700" /> },
+    UNASSIGNED: { text: 'text-[#54524A]', icon: <Inbox className="w-3.5 h-3.5 text-[#54524A]" /> },
+    COMPLETED: { text: 'text-emerald-700', icon: <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> },
+  };
+  const visibleTiles = WORKLIST_TILES.filter((t) => t.id !== 'UNASSIGNED' || canSeeAllRooms);
 
   return (
     <div className="space-y-6">
@@ -449,7 +538,7 @@ export const TechnicianWorklistPage: React.FC = () => {
               <h1 className="text-xl font-bold text-[#1B1B0E] flex items-center gap-2">
                 Technician Worklist & Specimen Lifecycle
                 <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold bg-[#E8E7E3] text-[#525333] border border-[#CAC7BE]">
-                  {department || 'Laboratory Workstation'}
+                  {summary?.department || department || 'Laboratory Workstation'}
                 </span>
               </h1>
               <p className="text-xs text-[#6D6A60]">
@@ -471,73 +560,38 @@ export const TechnicianWorklistPage: React.FC = () => {
         </div>
       </div>
 
-      {/* KPI Bento Grid Metric Tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-        <div className="bg-[#FAF9F6] p-3 rounded-2xl border border-[#DCDAD4] shadow-2xs">
-          <span className="text-[10px] font-semibold text-[#6D6A60] block">Assigned Queue</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-xl font-bold text-[#1B1B0E]">{summary?.total_assigned ?? 0}</span>
-            <Activity className="w-3.5 h-3.5 text-[#525333]" />
-          </div>
-        </div>
-
-        <div className="bg-[#FAF9F6] p-3 rounded-2xl border border-[#DCDAD4] shadow-2xs">
-          <span className="text-[10px] font-semibold text-[#CF8852] block">Urgent STAT</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-xl font-bold text-[#B05B20]">{summary?.urgent_count ?? 0}</span>
-            <span className="w-2 h-2 rounded-full bg-[#CF8852] animate-pulse" />
-          </div>
-        </div>
-
-        <div className="bg-[#FAF9F6] p-3 rounded-2xl border border-[#DCDAD4] shadow-2xs">
-          <span className="text-[10px] font-semibold text-[#8B6B23] block">Sample Pending</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-xl font-bold text-[#8B6B23]">{summary?.sample_pending_count ?? 0}</span>
-            <Droplet className="w-3.5 h-3.5 text-[#8B6B23]" />
-          </div>
-        </div>
-
-        <div className="bg-[#FAF9F6] p-3 rounded-2xl border border-[#DCDAD4] shadow-2xs">
-          <span className="text-[10px] font-semibold text-[#2B547E] block">In Progress</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-xl font-bold text-[#2B547E]">{summary?.in_progress_count ?? 0}</span>
-            <FlaskConical className="w-3.5 h-3.5 text-[#2B547E]" />
-          </div>
-        </div>
-
-        <div className="bg-[#FAF9F6] p-3 rounded-2xl border border-[#DCDAD4] shadow-2xs">
-          <span className="text-[10px] font-semibold text-amber-800 block">Doctor Queue</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-xl font-bold text-amber-800">{summary?.awaiting_doctor_count ?? 0}</span>
-            <Clock className="w-3.5 h-3.5 text-amber-700" />
-          </div>
-        </div>
-
-        <div className="bg-[#FAF9F6] p-3 rounded-2xl border border-[#DCDAD4] shadow-2xs">
-          <span className="text-[10px] font-semibold text-rose-700 block">Rejected / Spoil</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-xl font-bold text-rose-700">{summary?.rejected_count ?? 0}</span>
-            <XCircle className="w-3.5 h-3.5 text-rose-600" />
-          </div>
-        </div>
-
-        <div className={`p-3 rounded-2xl border shadow-2xs ${
-          (summary?.late_count || 0) > 0 ? 'bg-[#FDF2F2] border-rose-300' : 'bg-[#FAF9F6] border-[#DCDAD4]'
-        }`}>
-          <span className="text-[10px] font-semibold text-rose-700 block">Late Tasks</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-xl font-bold text-rose-700">{summary?.late_count ?? 0}</span>
-            <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-          </div>
-        </div>
-
-        <div className="bg-[#FAF9F6] p-3 rounded-2xl border border-[#DCDAD4] shadow-2xs">
-          <span className="text-[10px] font-semibold text-emerald-700 block">Completed</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-xl font-bold text-emerald-700">{summary?.completed_count ?? 0}</span>
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-          </div>
-        </div>
+      {/* KPI Bento Grid Metric Tiles — Prompt 10E Part 8: each tile is a filter (click again to clear) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3" role="group" aria-label="Worklist filters">
+        {visibleTiles.map((tile) => {
+          const active = isTileActive(tile.id, { statusFilter, urgentOnly });
+          const count = tileCount(summary as unknown as Record<string, unknown>, tile.id);
+          const lateAlert = tile.id === 'LATE' && count > 0 && !active;
+          return (
+            <button
+              key={tile.id}
+              type="button"
+              onClick={() => handleTileClick(tile.id)}
+              aria-pressed={active}
+              data-testid={`worklist-tile-${tile.id}`}
+              title={active ? `Showing: ${tile.label} (click to clear)` : `Show ${tile.label}`}
+              className={`text-left p-3 rounded-2xl border shadow-2xs transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#CF8852] focus-visible:ring-offset-1 ${
+                active
+                  ? 'bg-[#525333] border-[#3E3F27] shadow-xs'
+                  : lateAlert
+                  ? 'bg-[#FDF2F2] border-rose-300 hover:border-rose-400'
+                  : 'bg-[#FAF9F6] border-[#DCDAD4] hover:border-[#A9A68F] hover:bg-[#F4F3F0]'
+              }`}
+            >
+              <span className={`text-[10px] font-semibold block ${active ? 'text-white/80' : tileStyle[tile.id].text}`}>
+                {tile.label}
+              </span>
+              <span className="flex items-baseline justify-between mt-1">
+                <span className={`text-xl font-bold ${active ? 'text-white' : tileStyle[tile.id].text}`}>{count}</span>
+                {tileStyle[tile.id].icon}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Filter Toolbar & Status Tabs */}
@@ -594,6 +648,36 @@ export const TechnicianWorklistPage: React.FC = () => {
 
       {/* Main Worklist Table */}
       <div className="bg-[#FAF9F6] border border-[#DCDAD4] rounded-2xl overflow-hidden shadow-2xs">
+        {lastSaved && (
+          <div
+            role="status"
+            data-testid="last-saved-result"
+            className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-xs border-b border-[#DCDAD4] bg-[#EEF3F8] text-[#2B547E]"
+          >
+            <span>
+              Result saved{lastSaved.status === 'DRAFT' ? ' as DRAFT' : ' (submitted)'} for order #{lastSaved.id}: {lastSaved.testName}
+            </span>
+            <span className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPreviewOrderId(lastSaved.id)}
+                data-testid={`last-saved-preview-${lastSaved.id}`}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold bg-white text-[#2B547E] border border-[#B9C9DA] rounded-lg hover:bg-white/70 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#CF8852]"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                Preview Report
+              </button>
+              <button
+                type="button"
+                onClick={() => setLastSaved(null)}
+                aria-label="Dismiss saved-result notice"
+                className="px-2 py-1 text-[11px] text-[#54524A] hover:underline cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </span>
+          </div>
+        )}
         {loading ? (
           <div className="py-20 text-center">
             <RefreshCw className="w-7 h-7 text-[#525333] animate-spin mx-auto mb-3" />
@@ -604,9 +688,13 @@ export const TechnicianWorklistPage: React.FC = () => {
             <div className="w-12 h-12 rounded-full bg-[#E8E7E3] text-[#525333] flex items-center justify-center mx-auto mb-3">
               <FlaskConical className="w-6 h-6" />
             </div>
-            <h3 className="text-sm font-bold text-[#1B1B0E]">No Laboratory Tasks in Queue</h3>
+            <h3 className="text-sm font-bold text-[#1B1B0E]">
+              {statusFilter === 'READY' ? 'No Ready Reports Yet' : 'No Laboratory Tasks in Queue'}
+            </h3>
             <p className="text-xs text-[#6D6A60] mt-1 max-w-sm mx-auto">
-              There are no laboratory orders matching your selected filters. Switch filters or inspect other queues.
+              {statusFilter === 'READY'
+                ? 'A result appears here as soon as it is submitted (Submit Results). Drafts are not Ready. Click the Ready Reports tile again to clear the filter.'
+                : 'There are no laboratory orders matching your selected filters. Switch filters or inspect other queues.'}
             </p>
           </div>
         ) : (
@@ -626,13 +714,12 @@ export const TechnicianWorklistPage: React.FC = () => {
                 {items.map((order) => {
                   const hasSample = order.sample_status === 'COLLECTED';
                   const isRejected = order.status === 'REJECTED' || order.status === 'SPOILED';
+                  // Prompt 10E Part 2: one backend rule decides imaging / sample requirement
                   const isImaging =
-                    order.requires_doctor ||
-                    order.report_template === 'NARRATIVE' ||
-                    order.department === 'Radiology' ||
-                    order.department === 'Imaging' ||
-                    order.department === 'Ultrasonogram' ||
-                    order.department === 'X-Ray';
+                    order.is_imaging ??
+                    (order.requires_doctor || order.report_template === 'NARRATIVE');
+                  const needsSample = order.requires_sample ?? !isImaging;
+                  const canWork = hasSample || !needsSample;
                   const isCulture = order.report_template === 'CULTURE_SENSITIVITY';
 
                   return (
@@ -868,9 +955,19 @@ export const TechnicianWorklistPage: React.FC = () => {
                             {order.status.replace('_', ' ')}
                           </span>
 
+                          {order.lab_section_label && (
+                            <span className="text-[10px] text-[#525333] font-semibold block truncate" data-testid={`order-room-${order.test_order_id}`}>
+                              Room: {order.lab_section_label}
+                            </span>
+                          )}
                           {order.assigned_to_name && (
                             <span className="text-[10px] text-[#6D6A60] block truncate">
-                              Assignee: {order.assigned_to_name}
+                              Worked by: {order.assigned_to_name}
+                            </span>
+                          )}
+                          {order.report_ready && (
+                            <span className="inline-block text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              Report Ready
                             </span>
                           )}
                         </div>
@@ -967,7 +1064,7 @@ export const TechnicianWorklistPage: React.FC = () => {
                             /* 4. STANDARD LABORATORY SPECIMEN WORKFLOW (Module 12 & Module 13) */
                             <div className="space-y-1">
                               {/* Before Sample Collection: ONLY allow Sample Taken! */}
-                              {!hasSample && order.status !== 'COMPLETED' && (
+                              {!hasSample && needsSample && order.status !== 'COMPLETED' && (
                                 <button
                                   onClick={() => handleOpenSampleModal(order)}
                                   data-testid={`sample-taken-${order.test_order_id}`}
@@ -977,9 +1074,15 @@ export const TechnicianWorklistPage: React.FC = () => {
                                   <span>Sample Taken</span>
                                 </button>
                               )}
+                              {/* Prompt 10F (F4): results and Complete stay locked until Sample Taken */}
+                              {!hasSample && needsSample && order.status !== 'COMPLETED' && (
+                                <span className="block text-[10px] text-[#8B6B23] text-right" data-testid={`sample-first-hint-${order.test_order_id}`}>
+                                  Take the sample before entering results
+                                </span>
+                              )}
 
                               {/* After Sample Collection: Allow Operational Execution & Module 13 Result Entry */}
-                              {hasSample && order.status !== 'COMPLETED' && (
+                              {canWork && order.status !== 'COMPLETED' && (
                                 <div className="flex flex-col items-end gap-1">
                                   <div className="flex items-center gap-1">
                                     {/* Module 13: Enter Results Button */}
@@ -1024,7 +1127,8 @@ export const TechnicianWorklistPage: React.FC = () => {
                                       </button>
                                     ) : null}
 
-                                    {/* Reject Sample Option */}
+                                    {/* Reject Sample Option (only when a sample exists) */}
+                                    {hasSample && (
                                     <button
                                       onClick={() => handleOpenRejectModal(order)}
                                       data-testid={`reject-sample-${order.test_order_id}`}
@@ -1033,6 +1137,7 @@ export const TechnicianWorklistPage: React.FC = () => {
                                     >
                                       Reject
                                     </button>
+                                    )}
 
                                     {/* Complete Button (Only valid when sample collected) */}
                                     <button
@@ -1047,6 +1152,32 @@ export const TechnicianWorklistPage: React.FC = () => {
                                 </div>
                               )}
                             </div>
+                          )}
+
+                          {/* Prompt 10E Part 9: Preview Report once a result is saved */}
+                          {(order.has_result || order.result_status) && (
+                            <button
+                              onClick={() => setPreviewOrderId(order.test_order_id)}
+                              data-testid={`preview-report-${order.test_order_id}`}
+                              className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold bg-white text-[#2B547E] border border-[#B9C9DA] rounded-lg hover:bg-[#EEF3F8] transition-colors shadow-2xs cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#CF8852]"
+                              title="Preview the report of the saved result"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Preview Report</span>
+                            </button>
+                          )}
+
+                          {/* Prompt 10E Part 7: move to another room (worklist.reassign), until COMPLETED */}
+                          {canReassign && order.status !== 'COMPLETED' && order.status !== 'CANCELLED' && !isRejected && order.outcome !== 'NOT_PERFORMED' && (
+                            <button
+                              onClick={() => handleOpenReassign(order)}
+                              data-testid={`reassign-room-${order.test_order_id}`}
+                              className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold text-[#54524A] bg-white border border-[#CAC7BE] rounded-lg hover:bg-[#F4F3F0] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#CF8852]"
+                              title="Move this order to another lab room"
+                            >
+                              <MoveRight className="w-3 h-3" />
+                              <span>Reassign Room</span>
+                            </button>
                           )}
 
                           {/* 5. View Lifecycle History Timeline */}
@@ -1487,9 +1618,79 @@ export const TechnicianWorklistPage: React.FC = () => {
         isOpen={resultModalOpen}
         onClose={() => setResultModalOpen(false)}
         order={activeOrder}
-        onSuccess={fetchData}
+        onSuccess={handleResultSaved}
         showToast={showToast}
       />
+      {/* Prompt 10E Part 9: Report preview of a saved result */}
+      {previewOrderId !== null && (
+        <ResultReportPreviewModal
+          key={previewOrderId}
+          isOpen
+          onClose={() => setPreviewOrderId(null)}
+          testOrderId={previewOrderId}
+          source="lab"
+          onFinalized={fetchData}
+        />
+      )}
+
+      {/* Prompt 10E Part 7: Reassign to another room */}
+      <Modal isOpen={reassignModalOpen} onClose={() => setReassignModalOpen(false)} title="Reassign to Another Room">
+        {activeOrder && (
+          <form onSubmit={handleSubmitReassign} className="space-y-4 text-xs">
+            <div className="p-3 bg-[#F4F3F0] rounded-xl border border-[#DCDAD4] space-y-1">
+              <span className="font-semibold text-[#1B1B0E] block">
+                Order #{activeOrder.test_order_id}: {activeOrder.test_name}
+              </span>
+              <span className="text-[#6D6A60] block">Current room: {activeOrder.lab_section_label || 'none'}</span>
+              <span className="text-[#6D6A60] block">Samples and results already entered are kept.</span>
+            </div>
+            <div>
+              <label className="block font-semibold text-[#1B1B0E] mb-1" htmlFor="reassign-room-select">New room *</label>
+              <select
+                id="reassign-room-select"
+                data-testid="reassign-room-select"
+                required
+                value={reassignRoom}
+                onChange={(e) => setReassignRoom(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-[#CAC7BE] rounded-xl focus:outline-none focus:border-[#525333]"
+              >
+                <option value="" disabled>Select a room…</option>
+                {rooms
+                  .filter((r) => r.code !== activeOrder.lab_section)
+                  .map((r) => (
+                    <option key={r.code} value={r.code}>
+                      {r.name} ({r.room}){r.active_technicians === 0 ? ' — no technician' : ''}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold text-[#1B1B0E] mb-1" htmlFor="reassign-reason-input">Reason (optional)</label>
+              <input
+                id="reassign-reason-input"
+                type="text"
+                maxLength={255}
+                value={reassignReason}
+                onChange={(e) => setReassignReason(e.target.value)}
+                placeholder="e.g. analyser down in this room"
+                className="w-full px-3 py-2 bg-white border border-[#CAC7BE] rounded-xl focus:outline-none focus:border-[#525333]"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-[#DCDAD4]">
+              <button type="button" onClick={() => setReassignModalOpen(false)} className="px-4 py-2 font-medium text-[#54524A] hover:bg-[#F4F3F0] rounded-xl cursor-pointer">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submittingReassign || !reassignRoom}
+                className="px-4 py-2 font-semibold bg-[#525333] text-white rounded-xl hover:bg-[#3E3F27] disabled:opacity-50 cursor-pointer"
+              >
+                {submittingReassign ? 'Moving…' : 'Move Order'}
+              </button>
+            </div>
+          </form>
+        )}
+      </Modal>
     </div>
   );
 };

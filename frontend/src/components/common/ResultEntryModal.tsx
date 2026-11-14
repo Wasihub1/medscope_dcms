@@ -19,7 +19,8 @@ interface ResultEntryModalProps {
   isOpen: boolean;
   onClose: () => void;
   order: TechnicianWorklistItem | null;
-  onSuccess: () => void;
+  /** Prompt 10F: receives the saved result status so the grid can offer Preview right away */
+  onSuccess: (savedStatus?: 'DRAFT' | 'ENTERED') => void;
   showToast: (toast: { type: 'success' | 'error' | 'warning'; title: string; message: string }) => void;
 }
 
@@ -226,6 +227,8 @@ export const ResultEntryModal: React.FC<ResultEntryModalProps> = ({
         comments: comments.trim() || undefined,
         structured_data: structuredData,
         items,
+        // Prompt 16: edit-conflict check; the server refuses (409) when someone saved since this was opened
+        expected_updated_at: template?.existing_result?.updated_at,
       });
 
       showToast({
@@ -236,7 +239,7 @@ export const ResultEntryModal: React.FC<ResultEntryModalProps> = ({
             ? 'Result draft saved successfully.'
             : `Results successfully entered for Order #${order.test_order_id}.`,
       });
-      onSuccess();
+      onSuccess(submitStatus);
       onClose();
     } catch (err: any) {
       showToast({
@@ -366,7 +369,18 @@ export const ResultEntryModal: React.FC<ResultEntryModalProps> = ({
                           </td>
                           <td className="py-2 px-2 text-[#6D6A60] font-mono text-[11px]">{c.unit || '-'}</td>
                           <td className="py-2 px-3 text-[#54524A] text-[11px]">
-                            {c.reference_range_text || '-'}
+                            {c.range_match === 'NO_BAND' ? (
+                              <span className="text-amber-700 font-semibold" data-testid={`no-range-${c.id}`}>
+                                No range for this age/sex: review manually
+                              </span>
+                            ) : (
+                              <>
+                                {c.reference_range_text || (c.ref_min != null || c.ref_max != null ? `${c.ref_min ?? ''} - ${c.ref_max ?? ''}` : '-')}
+                                {c.range_match === 'FALLBACK_ANY' && (
+                                  <span className="block text-[9px] text-[#8E8A7E]">any-sex range used</span>
+                                )}
+                              </>
+                            )}
                           </td>
                           <td className="py-2 px-2 text-center">
                             {flagObj ? (

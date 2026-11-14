@@ -7,14 +7,13 @@ from backend.app.core.database import get_db
 from backend.app.core.security import (
     CurrentActor,
     get_current_actor,
-    require_admin,
     extract_session_token,
 )
+from backend.app.core.permissions import require_permission
 from backend.app.models.user import Staff
 from backend.app.schemas.auth import (
     LoginRequest,
     AuthUserResponse,
-    SwitchActingRoleRequest,
     ChangePasswordRequest,
     AdminResetPasswordRequest,
     AuthMessageResponse,
@@ -22,6 +21,26 @@ from backend.app.schemas.auth import (
 from backend.app.services import auth_service
 
 router = APIRouter()
+
+
+def _auth_user_response(db: Session, staff: Staff) -> AuthUserResponse:
+    """Prompt 10D: one fixed role per login; every login lands on /dashboard."""
+    perms = sorted(auth_service.load_effective_permissions(db, staff))
+    return AuthUserResponse(
+        id=staff.id,
+        tenant_id=staff.tenant_id,
+        username=staff.username,
+        display_name=staff.display_name,
+        roles=[staff.role],
+        acting_role=staff.role,
+        role=staff.role,
+        department=staff.department,
+        lab_section=staff.lab_section,
+        email=staff.email,
+        phone=staff.phone,
+        home_route=auth_service.get_home_route_for_role(staff.role),
+        permissions=perms,
+    )
 
 
 @router.post("/login", response_model=AuthUserResponse)
@@ -64,21 +83,7 @@ def login(
         path="/",
     )
 
-    roles = auth_service.get_staff_roles(db, staff.id, staff.role)
-    home_route = auth_service.get_home_route_for_role(session.acting_role)
-
-    return AuthUserResponse(
-        id=staff.id,
-        tenant_id=staff.tenant_id,
-        username=staff.username,
-        display_name=staff.display_name,
-        roles=roles,
-        acting_role=session.acting_role,
-        department=staff.department,
-        email=staff.email,
-        phone=staff.phone,
-        home_route=home_route,
-    )
+    return _auth_user_response(db, staff)
 
 
 @router.post("/logout", response_model=AuthMessageResponse)
@@ -115,7 +120,7 @@ def get_me(
     actor: CurrentActor = Depends(get_current_actor),
 ):
     """
-    Returns the currently authenticated staff profile, acting role, and home route.
+    Returns the currently authenticated staff profile, single role, permissions and home route.
     """
     staff = db.get(Staff, actor.id)
     if not staff:
@@ -124,60 +129,7 @@ def get_me(
             detail="Staff profile not found",
         )
 
-    roles = auth_service.get_staff_roles(db, staff.id, staff.role)
-    home_route = auth_service.get_home_route_for_role(actor.role)
-
-    return AuthUserResponse(
-        id=staff.id,
-        tenant_id=staff.tenant_id,
-        username=staff.username,
-        display_name=staff.display_name,
-        roles=roles,
-        acting_role=actor.role,
-        department=staff.department,
-        email=staff.email,
-        phone=staff.phone,
-        home_route=home_route,
-    )
-
-
-@router.post("/acting-role", response_model=AuthUserResponse)
-def switch_acting_role(
-    req: SwitchActingRoleRequest,
-    request: Request,
-    db: Session = Depends(get_db),
-    actor: CurrentActor = Depends(get_current_actor),
-):
-    """
-    Allows a user with multiple roles to switch active role within their session.
-    """
-    token = extract_session_token(request)
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-
-    session, staff = auth_service.resolve_session(db, token)
-    updated_session = auth_service.switch_acting_role(
-        db=db,
-        session=session,
-        staff=staff,
-        new_role=req.role,
-    )
-
-    roles = auth_service.get_staff_roles(db, staff.id, staff.role)
-    home_route = auth_service.get_home_route_for_role(updated_session.acting_role)
-
-    return AuthUserResponse(
-        id=staff.id,
-        tenant_id=staff.tenant_id,
-        username=staff.username,
-        display_name=staff.display_name,
-        roles=roles,
-        acting_role=updated_session.acting_role,
-        department=staff.department,
-        email=staff.email,
-        phone=staff.phone,
-        home_route=home_route,
-    )
+    return _auth_user_response(db, staff)
 
 
 @router.post("/change-password", response_model=AuthMessageResponse)
@@ -234,7 +186,7 @@ def admin_reset_password(
     user_id: int,
     req: AdminResetPasswordRequest,
     db: Session = Depends(get_db),
-    admin: CurrentActor = Depends(require_admin),
+    admin: CurrentActor = Depends(require_permission("user.manage")),
 ):
     """
     Admin or Owner resets another staff member's password and revokes their active sessions.
@@ -258,7 +210,7 @@ def admin_reset_password(
 def admin_unlock_user(
     user_id: int,
     db: Session = Depends(get_db),
-    admin: CurrentActor = Depends(require_admin),
+    admin: CurrentActor = Depends(require_permission("user.manage")),
 ):
     """
     Admin or Owner unlocks a locked staff account.

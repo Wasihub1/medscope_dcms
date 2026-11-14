@@ -1,6 +1,6 @@
-from typing import Optional
+from typing import FrozenSet, Optional
 from fastapi import Request, HTTPException, Depends, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
@@ -12,9 +12,12 @@ class CurrentActor(BaseModel):
     tenant_id: str
     username: str
     display_name: str
-    role: str  # Acting role in the current session
+    role: str  # The user's single fixed role (Prompt 10D: one login = one role)
     email: Optional[str] = None
     phone: Optional[str] = None
+    lab_section: Optional[str] = None
+    # Effective permissions = role defaults + per-user overrides (backend/app/core/permissions.py)
+    permissions: FrozenSet[str] = Field(default_factory=frozenset)
 
 
 def extract_session_token(request: Request) -> Optional[str]:
@@ -62,51 +65,19 @@ def get_current_actor(
                     detail="CSRF protection error: missing X-Requested-With header",
                 )
 
-    from backend.app.services.auth_service import resolve_session
+    from backend.app.services.auth_service import resolve_session, load_effective_permissions
     session, staff = resolve_session(db, token)
 
+    # Prompt 10D: the staff record's single role is authoritative (sessions created before the
+    # single-role change may still carry an old acting_role; it is ignored).
     return CurrentActor(
         id=staff.id,
         tenant_id=staff.tenant_id,
         username=staff.username,
         display_name=staff.display_name,
-        role=session.acting_role,
+        role=staff.role,
         email=staff.email,
         phone=staff.phone,
+        lab_section=staff.lab_section,
+        permissions=load_effective_permissions(db, staff),
     )
-
-
-def require_receptionist(
-    actor: CurrentActor = Depends(get_current_actor),
-) -> CurrentActor:
-    """Ensures actor is permitted to perform Receptionist operations."""
-    if actor.role not in ("RECEPTIONIST", "CASHIER", "ADMIN", "OWNER"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Operation restricted to Receptionist, Cashier, Admin, or Owner roles.",
-        )
-    return actor
-
-
-def require_lab_tech_or_admin(
-    actor: CurrentActor = Depends(get_current_actor),
-) -> CurrentActor:
-    """Ensures actor is permitted to perform Laboratory Technician operations."""
-    if actor.role not in ("LAB_TECH", "ADMIN", "OWNER"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Operation restricted to Laboratory Technicians, Admin, or Owner.",
-        )
-    return actor
-
-
-def require_admin(
-    actor: CurrentActor = Depends(get_current_actor),
-) -> CurrentActor:
-    """Ensures actor has Admin or Owner authority (e.g. for approving refunds)."""
-    if actor.role not in ("ADMIN", "OWNER"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Operation requires Admin or Owner authorization.",
-        )
-    return actor

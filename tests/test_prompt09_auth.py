@@ -40,9 +40,9 @@ def test_01_successful_login(client):
     assert data["id"] == 1
     assert data["username"] == "reception_fatima"
     assert data["acting_role"] == "RECEPTIONIST"
-    assert data["home_route"] == "/invoices"
-    assert "RECEPTIONIST" in data["roles"]
-    assert "CASHIER" in data["roles"]
+    # Prompt 10D: every login lands on the Dashboard; one login = one fixed role
+    assert data["home_route"] == "/dashboard"
+    assert data["roles"] == ["RECEPTIONIST"]
 
     # Verify HttpOnly session cookie was set
     assert "medscope_session" in client.cookies
@@ -236,37 +236,32 @@ def test_07_password_change_lifecycle(client, db_session):
     assert r_new_login.status_code == 200
 
 
-def test_08_acting_role_switch(client):
-    """Staff with multiple roles can switch active role, but cannot switch to unheld roles."""
-    # Tariq holds ADMIN and OWNER
+def test_08_single_fixed_role_no_switching(client):
+    """Prompt 10D (replaces the old acting-role switch test): one login = one fixed role.
+    The acting-role endpoint is gone and a login cannot pick another role."""
     login_res = client.post(
         "/auth/login",
-        json={"username": "admin_tariq", "password": TEST_PASSWORD_DEFAULT, "role": "ADMIN"},
+        json={"username": "admin_tariq", "password": TEST_PASSWORD_DEFAULT},
     )
     assert login_res.status_code == 200
     assert login_res.json()["acting_role"] == "ADMIN"
-    assert login_res.json()["home_route"] == "/"
+    assert login_res.json()["roles"] == ["ADMIN"]
+    assert login_res.json()["home_route"] == "/dashboard"
 
-    # Switch to OWNER
+    # The former switch endpoint no longer exists
     switch_res = client.post(
         "/auth/acting-role",
         headers={"X-Requested-With": "XMLHttpRequest"},
         json={"role": "OWNER"},
     )
-    assert switch_res.status_code == 200
-    assert switch_res.json()["acting_role"] == "OWNER"
+    assert switch_res.status_code == 404
 
-    # Verify /auth/me reflects OWNER
-    me = client.get("/auth/me")
-    assert me.json()["acting_role"] == "OWNER"
-
-    # Attempt to switch to LAB_TECH (not held) -> 403 Forbidden
-    bad_switch = client.post(
-        "/auth/acting-role",
-        headers={"X-Requested-With": "XMLHttpRequest"},
-        json={"role": "LAB_TECH"},
+    # Asking for a role the user does not hold at login is rejected
+    bad_login = client.post(
+        "/auth/login",
+        json={"username": "admin_tariq", "password": TEST_PASSWORD_DEFAULT, "role": "OWNER"},
     )
-    assert bad_switch.status_code == 403
+    assert bad_login.status_code == 403
 
 
 def test_09_role_guards_enforced_with_real_sessions(client):
@@ -297,7 +292,7 @@ def test_09_role_guards_enforced_with_real_sessions(client):
     close_adm = client.post(
         "/business-day/close",
         headers=ADMIN_HEADERS,
-        json={"notes": "Authorized close by admin"},
+        json={"counted_cash": 0, "variance_reason": "test close", "notes": "Authorized close by admin"},
     )
     assert close_adm.status_code in [200, 400]
     assert close_adm.status_code != 403

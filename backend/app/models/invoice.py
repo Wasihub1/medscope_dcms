@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Boolean, DateTime, Integer, ForeignKey, Index, CheckConstraint
+from sqlalchemy import String, Boolean, DateTime, Integer, ForeignKey, Index, CheckConstraint, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.app.core.database import Base
 from backend.app.core.timezone import utc_now
@@ -10,7 +10,8 @@ class Invoice(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    visit_id: Mapped[int] = mapped_column(Integer, ForeignKey("visits.id"), nullable=False, index=True)
+    # Prompt 10D: nullable because a DRAFT invoice has no visit until it is finalized.
+    visit_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("visits.id"), nullable=True, index=True)
     patient_id: Mapped[int] = mapped_column(Integer, ForeignKey("patients.id"), nullable=False, index=True)
     invoice_no: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     temp_invoice_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
@@ -28,10 +29,18 @@ class Invoice(Base):
     paid: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     due: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     refund_due: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Prompt 10E Part 5: urgent fee computed by the backend; part of net; never refunded on line cancellation
+    urgent_fee: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Prompt 17 (D11): total written off as bad debt (separate from discount). due = net - paid - written_off (after refunds).
+    written_off: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     urgent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     created_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("staff.id"), nullable=True)
+
+    # Prompt 10D Part 3: Draft / Finalize workflow
+    draft_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     patient: Mapped["Patient"] = relationship("Patient", back_populates="invoices")
     visit: Mapped["Visit"] = relationship("Visit", back_populates="invoices")
@@ -39,6 +48,8 @@ class Invoice(Base):
     referrer: Mapped["Referrer | None"] = relationship("Referrer", foreign_keys=[referrer_id], back_populates="invoices")
     lines: Mapped[list["InvoiceLine"]] = relationship("InvoiceLine", back_populates="invoice", cascade="all, delete-orphan")
     payments: Mapped[list["Payment"]] = relationship("Payment", back_populates="invoice")
+    # Prompt 10D: ORM-only relationship (no schema change). disburse_refund already relied on it.
+    refund_requests: Mapped[list["RefundRequest"]] = relationship("RefundRequest", back_populates="invoice")
     created_by: Mapped["Staff"] = relationship("Staff")
 
     __table_args__ = (
@@ -48,6 +59,7 @@ class Invoice(Base):
         CheckConstraint("net >= 0", name="chk_invoice_net_nonneg"),
         CheckConstraint("paid >= 0", name="chk_invoice_paid_nonneg"),
         CheckConstraint("due >= 0", name="chk_invoice_due_nonneg"),
+        CheckConstraint("urgent_fee >= 0", name="chk_invoice_urgent_fee_nonneg"),
     )
 
 
@@ -71,6 +83,8 @@ class InvoiceLine(Base):
     net_price: Mapped[int] = mapped_column(Integer, nullable=False)  # Whole-Taka integer
 
     urgent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Prompt 10E Part 5: snapshot of the urgent fee charged for this line (informational)
+    urgent_fee: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     status: Mapped[str] = mapped_column(String(30), default="CONFIRMED", nullable=False)  # CONFIRMED, CANCELLED
 
     # Module 12: Post-Sample Collection / Execution Line Lock

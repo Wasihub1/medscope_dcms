@@ -20,6 +20,8 @@ class TestResponse(BaseSchema):
     report_template: str = "NUMERIC_TABLE"
     approval_rule: str = "TECHNICIAN_FINAL"
     is_outsourced: bool = False
+    # Prompt 10E Part 7: lab room the test routes to (None = no room, routed as UNASSIGNED)
+    lab_section: Optional[str] = None
     active: bool
 
     @model_validator(mode="after")

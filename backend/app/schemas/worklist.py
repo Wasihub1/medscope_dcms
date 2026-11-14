@@ -80,6 +80,12 @@ class TechnicianWorklistItemResponse(BaseSchema):
     lab_clock_display: Optional[str] = None
     is_late: bool
     late_reason: Optional[str] = None
+    # Prompt 10E: sample rule, room and report readiness (all money-free)
+    requires_sample: bool = True
+    is_imaging: bool = False
+    lab_section: Optional[str] = None
+    lab_section_label: Optional[str] = None
+    report_ready: bool = False
 
 
 class SampleTakenRequest(BaseModel):
@@ -184,3 +190,22 @@ class WorklistSummaryResponse(BaseSchema):
     culture_count: int = 0
     imaging_count: int = 0
     outsourced_count: int = 0
+    # Prompt 10E
+    ready_count: int = 0
+    unassigned_count: int = 0
+    lab_section: Optional[str] = None
+
+
+class ReassignRoomRequest(BaseModel):
+    """Prompt 10E Part 7: move an order to another room (worklist.reassign)."""
+    lab_section: str
+    reason: Optional[str] = None
+
+
+class RoomResponse(BaseModel):
+    code: str
+    name: str
+    room: str
+    destination: str
+    label: Optional[str] = None
+    active_technicians: int = 0

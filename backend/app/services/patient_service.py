@@ -149,7 +149,7 @@ def get_patient_history(
     # Load invoices
     stmt_i = (
         select(Invoice)
-        .where(Invoice.tenant_id == tenant_id, Invoice.patient_id == patient_id)
+        .where(Invoice.tenant_id == tenant_id, Invoice.patient_id == patient_id, Invoice.status != "DRAFT")
         .order_by(desc(Invoice.created_at))
     )
     invoices = list(db.execute(stmt_i).scalars().all())

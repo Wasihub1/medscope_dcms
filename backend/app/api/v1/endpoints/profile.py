@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend.app.core.database import get_db
-from backend.app.core.security import CurrentActor, require_receptionist
+from backend.app.core.security import CurrentActor
+from backend.app.core.permissions import require_permission
 from backend.app.models.user import Staff
 from backend.app.schemas.profile import ProfileResponse, ProfileUpdateRequest
 from backend.app.services.audit_service import log_audit_event
@@ -9,10 +10,10 @@ from backend.app.services.audit_service import log_audit_event
 router = APIRouter()
 
 
-@router.get("/me", response_model=ProfileResponse, summary="Get own Receptionist profile")
-@router.get("", response_model=ProfileResponse, summary="Get own Receptionist profile (alias for /me)")
+@router.get("/me", response_model=ProfileResponse, summary="Get own profile (any role with profile.manage)")
+@router.get("", response_model=ProfileResponse, summary="Get own profile (alias for /me)")
 def get_my_profile(
-    actor: CurrentActor = Depends(require_receptionist),
+    actor: CurrentActor = Depends(require_permission("profile.manage")),
     db: Session = Depends(get_db),
 ):
     staff = db.get(Staff, actor.id)
@@ -49,7 +50,7 @@ def get_my_profile(
 @router.patch("", response_model=ProfileResponse, summary="Patch profile (alias)")
 def update_my_profile(
     data: ProfileUpdateRequest,
-    actor: CurrentActor = Depends(require_receptionist),
+    actor: CurrentActor = Depends(require_permission("profile.manage")),
     db: Session = Depends(get_db),
 ):
     staff = db.get(Staff, actor.id)
@@ -64,9 +65,6 @@ def update_my_profile(
     staff.address = data.address.strip() if data.address else None
     staff.avatar_url = data.avatar_url.strip() if data.avatar_url else None
 
-    db.commit()
-    db.refresh(staff)
-
     log_audit_event(
         db=db,
         tenant_id=actor.tenant_id,
@@ -78,6 +76,9 @@ def update_my_profile(
         before_value=before_val,
         after_value=f"Name: {staff.display_name}, Phone: {staff.phone}, Email: {staff.email}",
     )
+    # Prompt 10E: commit after the audit row (it was written after the commit and never saved)
+    db.commit()
+    db.refresh(staff)
 
     return ProfileResponse(
         id=staff.id,

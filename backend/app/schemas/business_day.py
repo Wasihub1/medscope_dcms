@@ -5,7 +5,7 @@ from backend.app.schemas.common import BaseSchema
 
 
 class ChannelBalanceItem(BaseModel):
-    channel: str  # CASH, BKASH, NAGAD, BANK_TRANSFER, POS_CARD
+    channel: str  # CASH, BKASH, NAGAD, ROCKET, POS_CARD, BANK_TRANSFER, OTHER
     opening_balance: int = Field(default=0, ge=0)
     received_amount: int = Field(default=0, ge=0)
 
@@ -37,6 +37,13 @@ class BusinessDayChannelBalanceResponse(BaseSchema):
         if self.current_balance is None:
             self.current_balance = self.opening_balance + self.received_amount
         return self
+
+
+class BusinessDayState(BaseModel):
+    """Prompt 13B: the open/closed fact only (no money field), readable by every authenticated role."""
+    is_open: bool
+    day_number: Optional[int] = None
+    business_date: Optional[str] = None
 
 
 class BusinessDayStatusResponse(BaseSchema):

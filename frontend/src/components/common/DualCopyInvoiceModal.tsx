@@ -1,6 +1,7 @@
 import React from 'react';
 import { Printer, X, ArrowLeft, CheckCircle2, AlertTriangle, FileText, Scissors } from 'lucide-react';
 import { Invoice } from '../../types';
+import { channelLabel } from '../../utils/paymentChannels';
 
 export interface PreviewInvoiceData {
   patient_name: string;
@@ -29,6 +30,8 @@ export interface PreviewInvoiceData {
   paid_amount: number;
   due_amount: number;
   payment_channel?: string;
+  /** Prompt 10E: channel name typed for OTHER */
+  payment_channel_detail?: string;
   reference_no?: string;
   notes?: string;
 }
@@ -43,6 +46,10 @@ interface DualCopyInvoiceModalProps {
   onBack?: () => void;
   onSave?: () => void;
   onSaveAndPrint?: () => void;
+  /** Prompt 10D: saves the form as a DRAFT (no invoice number, no operational effect). */
+  onSaveDraft?: () => void;
+  /** Prompt 10D: placeholder number of an already saved draft (e.g. DRAFT-1A2B3C4D5E). */
+  draftLabel?: string | null;
   saving?: boolean;
 }
 
@@ -57,6 +64,8 @@ export const DualCopyInvoiceModal: React.FC<DualCopyInvoiceModalProps> = ({
   onSave,
   onSaveAndPrint,
   saving = false,
+  onSaveDraft,
+  draftLabel = null,
 }) => {
   if (!isOpen) return null;
 
@@ -92,6 +101,7 @@ export const DualCopyInvoiceModal: React.FC<DualCopyInvoiceModalProps> = ({
         net_amount: invoiceData.net_amount,
         paid_amount: invoiceData.paid_amount,
         due_amount: invoiceData.due_amount,
+        payment_text: invoiceData.paid_amount > 0 ? channelLabel(invoiceData.payment_channel, invoiceData.payment_channel_detail) : '',
         created_by_name: 'Reception Desk',
         is_duplicate: false,
         reprint_count: 0,
@@ -103,8 +113,11 @@ export const DualCopyInvoiceModal: React.FC<DualCopyInvoiceModalProps> = ({
         patient_name: savedInvoice.patient_name,
         patient_mrn: savedInvoice.patient_mrn,
         patient_phone: savedInvoice.patient_phone,
-        patient_gender: savedInvoice.patient_gender,
-        patient_age_display: savedInvoice.patient_age_display,
+        patient_gender: savedInvoice.visit_gender || savedInvoice.patient_gender || undefined,
+        patient_age_display:
+          savedInvoice.age_value !== undefined && savedInvoice.age_value !== null
+            ? `${savedInvoice.age_value} ${savedInvoice.age_unit || 'years'}`
+            : savedInvoice.patient_age_display || undefined,
         prescribed_by_name: savedInvoice.prescribed_by_name || 'Self / Walk-in',
         referrer_name: savedInvoice.referrer_name || 'Self / Walk-in',
         lines: (savedInvoice.lines || []).map((l: any) => ({
@@ -112,16 +125,22 @@ export const DualCopyInvoiceModal: React.FC<DualCopyInvoiceModalProps> = ({
           department: l.department || l.department_snapshot || (l.test && l.test.department) || '',
           price: l.price ?? l.unit_price_snapshot ?? (l.test && l.test.price) ?? 0,
           is_urgent: l.is_urgent ?? l.urgent ?? false,
-          urgent_fee: l.urgent_fee ?? 0,
+          urgent_fee: l.line_urgent_fee ?? l.urgent_fee ?? 0,
           discount_amount: l.discount_amount ?? 0,
-          net_amount: l.net_amount ?? l.net_price ?? 0,
+          net_amount: (l.net_amount ?? l.net_price ?? 0) + (l.line_urgent_fee ?? 0),
         })),
         gross_amount: savedInvoice.gross_amount,
-        urgent_fee_total: savedInvoice.urgent_fee_total,
-        total_discount: savedInvoice.line_discount_total + savedInvoice.master_discount_amount,
+        urgent_fee_total: savedInvoice.urgent_fee ?? savedInvoice.urgent_fee_total ?? 0,
+        total_discount:
+          (savedInvoice as any).discount_amount ??
+          (savedInvoice.line_discount_total || 0) + (savedInvoice.master_discount_amount || 0),
         net_amount: savedInvoice.net_amount,
         paid_amount: savedInvoice.paid_amount,
         due_amount: savedInvoice.due_amount,
+        payment_text: (savedInvoice.payments || [])
+          .map((p: any) => channelLabel(p.method || p.channel, p.channel_detail))
+          .filter((v, i, arr) => v && arr.indexOf(v) === i)
+          .join(', '),
         created_by_name: savedInvoice.created_by_name || 'Front Desk Staff',
         is_duplicate: isReprint || savedInvoice.is_duplicate_reprint,
         reprint_count: savedInvoice.reprint_count || 1,
@@ -152,6 +171,7 @@ export const DualCopyInvoiceModal: React.FC<DualCopyInvoiceModalProps> = ({
         net_amount: invoiceData.net_amount,
         paid_amount: invoiceData.paid_amount,
         due_amount: invoiceData.due_amount,
+        payment_text: invoiceData.paid_amount > 0 ? channelLabel(invoiceData.payment_channel, invoiceData.payment_channel_detail) : '',
         created_by_name: 'Reception Desk',
         is_duplicate: false,
         reprint_count: 0,
@@ -289,6 +309,12 @@ export const DualCopyInvoiceModal: React.FC<DualCopyInvoiceModalProps> = ({
             <span>Paid Amount:</span>
             <span>৳{data.paid_amount.toLocaleString()}</span>
           </div>
+          {data.payment_text && (
+            <div className="flex justify-between text-gray-600" data-testid="invoice-payment-channel">
+              <span>Paid via:</span>
+              <span>{data.payment_text}</span>
+            </div>
+          )}
           <div
             className={`flex justify-between font-bold ${
               data.due_amount > 0 ? 'text-red-700' : 'text-gray-700'
@@ -338,9 +364,24 @@ export const DualCopyInvoiceModal: React.FC<DualCopyInvoiceModalProps> = ({
               {isPreview ? 'Invoice Preview (Non-Final Draft)' : `Diagnostic Bill #${data.invoice_number}`}
             </span>
             {isPreview && (
-              <span className="px-2 py-0.5 text-[10px] font-bold bg-[#FEF7EC] text-[#8A5608] border border-[#FBE0B2] rounded-full">
-                Unsaved Draft
+              <span
+                data-testid="invoice-draft-tag"
+                className="px-2 py-0.5 text-[10px] font-bold bg-[#FEF7EC] text-[#8A5608] border border-[#FBE0B2] rounded-full"
+              >
+                {draftLabel ? `Saved Draft ${draftLabel}` : 'Unsaved Draft'}
               </span>
+            )}
+            {isPreview && onSaveDraft && (
+              <button
+                type="button"
+                onClick={onSaveDraft}
+                disabled={saving}
+                data-testid="invoice-preview-save-draft-btn"
+                className="inline-flex items-center gap-1.5 px-3 py-1 text-[11px] font-semibold text-[#525333] bg-white border border-[#CAC7BE] hover:bg-[#F4F3F0] rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <FileText className="w-3.5 h-3.5 text-[#525333]" />
+                <span>{saving ? 'Saving...' : 'Save Draft'}</span>
+              </button>
             )}
             {data.is_duplicate && (
               <span className="px-2 py-0.5 text-[10px] font-bold bg-[#FDF2F0] text-[#9C2417] border border-[#F8CBC6] rounded-full">
@@ -367,22 +408,22 @@ export const DualCopyInvoiceModal: React.FC<DualCopyInvoiceModalProps> = ({
                   type="button"
                   onClick={onSave}
                   disabled={saving}
-                  data-testid="invoice-preview-save-btn"
+                  data-testid="invoice-preview-finalize-btn"
                   className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#525333] hover:bg-[#444529] rounded-xl transition-colors shadow-xs cursor-pointer disabled:opacity-50"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>{saving ? 'Saving...' : 'Save Invoice'}</span>
+                  <span>{saving ? 'Finalizing...' : 'Finalize'}</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={onSaveAndPrint}
                   disabled={saving}
-                  data-testid="invoice-preview-save-print-btn"
+                  data-testid="invoice-preview-finalize-print-btn"
                   className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#CF8852] hover:bg-[#B7703B] rounded-xl transition-colors shadow-xs cursor-pointer disabled:opacity-50"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  <span>{saving ? 'Saving...' : 'Save & Print'}</span>
+                  <span>{saving ? 'Finalizing...' : 'Finalize & Print'}</span>
                 </button>
               </>
             ) : (

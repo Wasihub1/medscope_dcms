@@ -22,6 +22,16 @@ class Patient(Base):
     visits: Mapped[list["Visit"]] = relationship("Visit", back_populates="patient", order_by="desc(Visit.created_at)")
     invoices: Mapped[list["Invoice"]] = relationship("Invoice", back_populates="patient", order_by="desc(Invoice.created_at)")
 
+    # Prompt 10E Part 3: the patient table stores no age; the New Invoice form prefills the
+    # age from the most recent visit snapshot (visits are ordered newest first).
+    @property
+    def last_age_value(self):
+        return self.visits[0].age_value if self.visits else None
+
+    @property
+    def last_age_unit(self):
+        return self.visits[0].age_unit if self.visits else None
+
     __table_args__ = (
         Index("idx_patient_tenant_code", "tenant_id", "patient_code", unique=True),
         Index("idx_patient_tenant_phone", "tenant_id", "phone"),

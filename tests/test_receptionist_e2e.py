@@ -103,6 +103,8 @@ def test_04_test_search_discounts_and_invoice_creation(client):
     # Create invoice with 100% discount on test item (zero net allowed per prompt 03)
     inv_payload = {
         "patient_id": 1,
+        "age_value": 35,  # Prompt 10E: Finalize requires age and gender
+        "gender": "Male",
         "lines": [
             {
                 "test_id": test_item["id"],
@@ -118,9 +120,13 @@ def test_04_test_search_discounts_and_invoice_creation(client):
     res = client.post("/invoices", headers=RECEPTIONIST_HEADERS, json=inv_payload)
     assert res.status_code in [200, 201], res.text
     inv = res.json()
-    assert inv["net_amount"] == 0
-    assert inv["due_amount"] == 0
-    assert inv["payment_status"] == "PAID"
+    # Prompt 10E Part 5: the urgent fee (max(100, 20% of price), computed by the backend) is not
+    # discountable, so a 100%-discounted urgent line still owes the fee.
+    fee = max(100, (test_item["price"] * 2 + 5) // 10)
+    assert inv["urgent_fee"] == fee
+    assert inv["net_amount"] == fee
+    assert inv["due_amount"] == fee
+    assert inv["payment_status"] == "UNPAID"
     inv_detail = client.get(f"/invoices/{inv['id']}", headers=RECEPTIONIST_HEADERS).json()
     assert len(inv_detail["lines"]) == 1
 
@@ -137,6 +143,8 @@ def test_05_overpayment_rejection_and_payment_validation(client):
     # Create an invoice with partial payment (due > 0)
     inv_payload = {
         "patient_id": 1,
+        "age_value": 35,  # Prompt 10E: Finalize requires age and gender
+        "gender": "Male",
         "lines": [{"test_id": test_id, "discount_type": "NONE", "discount_value": 0}],
         "initial_payment": 0,
         "payment_method": "CASH",
@@ -168,6 +176,8 @@ def test_06_settle_due_and_financial_ledger_update(client):
         headers=RECEPTIONIST_HEADERS,
         json={
             "patient_id": 1,
+            "age_value": 35,  # Prompt 10E: Finalize requires age and gender
+            "gender": "Male",
             "lines": [{"test_id": test_id, "discount_type": "NONE", "discount_value": 0}],
             "initial_payment": 100,
             "payment_method": "CASH",
@@ -231,6 +241,8 @@ def test_08_refund_lifecycle_and_collected_sample_gate(client):
         headers=RECEPTIONIST_HEADERS,
         json={
             "patient_id": 1,
+            "age_value": 35,  # Prompt 10E: Finalize requires age and gender
+            "gender": "Male",
             "lines": [{"test_id": test_id, "discount_type": "NONE", "discount_value": 0}],
             "initial_payment": tests[0]["price"],
             "payment_method": "CASH",
@@ -255,25 +267,17 @@ def test_08_refund_lifecycle_and_collected_sample_gate(client):
     assert req_res.status_code in [200, 201], req_res.text
     refund = req_res.json()
     refund_id = refund["id"]
-    assert refund["status"] in ["PENDING", "PENDING_ADMIN_APPROVAL"]
+    # Prompt 13A: pre-lock cancellation needs no approval; the refund is approved at once, awaiting payout
+    assert refund["status"] == "APPROVED"
+    assert refund["amount"] == refund_amount
 
-    # Receptionist attempts to approve refund -> 403 Forbidden
+    # The (legacy) approval endpoint is still Admin/Owner-only: a Receptionist gets 403
     rec_approve = client.post(
         f"/refunds/review/{refund_id}",
         headers=RECEPTIONIST_HEADERS,
         json={"action": "APPROVE", "review_notes": "Attempt unauthorized approval"},
     )
     assert rec_approve.status_code == 403, "Receptionist must not approve refunds"
-
-    # Admin approves refund -> 200 OK
-    admin_approve = client.post(
-        f"/refunds/review/{refund_id}",
-        headers=ADMIN_HEADERS,
-        json={"action": "APPROVE", "review_notes": "Approved by administrator"},
-    )
-    assert admin_approve.status_code == 200, admin_approve.text
-    approved_refund = admin_approve.json()
-    assert approved_refund["status"] == "APPROVED"
 
 
 # ---------------------------------------------------------------------------

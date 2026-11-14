@@ -122,6 +122,8 @@ def _create_isolated_order(client, db_session, test_id=1, sample_status="COLLECT
         headers=RECEPTIONIST_HEADERS,
         json={
             "patient_id": 1,
+            "age_value": 35,  # Prompt 10E: Finalize requires age and gender
+            "gender": "Male",
             "lines": [{"test_id": test_id, "discount_type": "NONE", "discount_value": 0}],
             "initial_payment": 400,
             "payment_method": "CASH",

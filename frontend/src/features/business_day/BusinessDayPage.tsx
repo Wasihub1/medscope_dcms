@@ -18,6 +18,7 @@ import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { DayClosePanel } from './DayClosePanel';
 
 export const BusinessDayPage: React.FC = () => {
   const [businessDay, setBusinessDay] = useState<BusinessDay | null>(null);
@@ -90,22 +91,6 @@ export const BusinessDayPage: React.FC = () => {
     }
   };
 
-  const handleAttemptClose = async () => {
-    try {
-      await api.closeBusinessDay();
-      showToast({ type: 'success', title: 'Day Closed', message: 'Business day has been closed.' });
-      fetchCurrentDay();
-      refreshBusinessDay();
-    } catch (err: any) {
-      // Expected for RECEPTIONIST: HTTP 403
-      showToast({
-        type: 'error',
-        title: 'Closing Restricted (403)',
-        message: err.message || 'Receptionists cannot close business days. Cashier or Admin role required.',
-      });
-    }
-  };
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -127,16 +112,7 @@ export const BusinessDayPage: React.FC = () => {
               <Unlock className="w-4 h-4" />
               <span>Open Business Day</span>
             </button>
-          ) : role === 'ADMIN' || role === 'OWNER' ? (
-            <button
-              data-testid="admin-close-day-btn"
-              onClick={handleAttemptClose}
-              className="px-4 py-2 bg-[#9C2417] hover:bg-[#7E1D12] text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer text-xs inline-flex items-center gap-1.5"
-            >
-              <Lock className="w-4 h-4 text-white" />
-              <span>Close Business Day (Admin)</span>
-            </button>
-          ) : (
+          ) : role === 'ADMIN' || role === 'OWNER' ? null : (
             <button
               disabled
               data-testid="receptionist-close-day-disabled"
@@ -160,6 +136,8 @@ export const BusinessDayPage: React.FC = () => {
           forbidden for the Receptionist role.
         </div>
       </div>
+
+      {(role === 'ADMIN' || role === 'OWNER') && <DayClosePanel onChanged={() => { fetchCurrentDay(); refreshBusinessDay(); }} />}
 
       {businessDay ? (
         <div className="space-y-6">

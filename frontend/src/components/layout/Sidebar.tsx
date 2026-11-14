@@ -5,6 +5,8 @@ import {
   PlusCircle,
   Receipt,
   Users,
+  Trash2,
+  ScrollText,
   GitBranch,
   CreditCard,
   FileCheck,
@@ -15,6 +17,10 @@ import {
   ChevronRight,
   ShieldCheck,
   FlaskConical,
+  UserCog,
+  UserCheck,
+  Settings,
+  Scale,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -24,22 +30,34 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleCollapse }) => {
-  const { role, tenantName } = useAuth();
+  const { role, tenantName, hasPermission } = useAuth();
   const location = useLocation();
 
-  const navItems = [
+  // Prompt 10D: items are shown only when the user holds the permission behind the page.
+  const allNavItems: { label: string; path: string; icon: React.ElementType; highlight?: boolean; permission?: string | string[] }[] = [
     { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
-    { label: 'My Work (Lab)', path: '/worklist', icon: FlaskConical, highlight: role === 'LAB_TECH' },
-    { label: 'New Invoice', path: '/invoices/new', icon: PlusCircle, highlight: role !== 'LAB_TECH' },
-    { label: 'Invoices', path: '/invoices', icon: Receipt },
-    { label: 'Patients', path: '/patients', icon: Users },
-    { label: 'Assign Tests', path: '/assignments', icon: GitBranch },
-    { label: 'Dues Settlement', path: '/dues', icon: CreditCard },
-    { label: 'Ready Reports', path: '/reports', icon: FileCheck },
-    { label: 'Refund Requests', path: '/refunds', icon: RotateCcw },
-    { label: 'Business Day', path: '/business-day', icon: CalendarDays },
-    { label: 'My Profile', path: '/profile', icon: UserCircle },
+    { label: 'My Work (Lab)', path: '/worklist', icon: FlaskConical, highlight: role === 'LAB_TECH' || role === 'DOCTOR', permission: 'worklist.view' },
+    { label: 'New Invoice', path: '/invoices/new', icon: PlusCircle, highlight: role !== 'LAB_TECH' && role !== 'DOCTOR', permission: ['invoice.create', 'invoice.finalize'] },
+    { label: 'Doctor Sign-off', path: '/doctor-approvals', icon: UserCheck, highlight: role === 'DOCTOR', permission: 'result.complete_doctor_routed' },
+    { label: 'Invoices', path: '/invoices', icon: Receipt, permission: 'invoice.view' },
+    { label: 'Patients', path: '/patients', icon: Users, permission: 'patient.view' },
+    { label: 'Assign Tests', path: '/assignments', icon: GitBranch, permission: 'assignment.manage' },
+    { label: 'Dues Settlement', path: '/dues', icon: CreditCard, permission: 'payment.view' },
+    { label: 'Ready Reports', path: '/reports', icon: FileCheck, permission: 'report.view' },
+    { label: 'Refund Requests', path: '/refunds', icon: RotateCcw, permission: 'refund.view' },
+    { label: 'Business Day', path: '/business-day', icon: CalendarDays, permission: 'business_day.view' },
+    { label: 'User Management', path: '/users', icon: UserCog, permission: 'user.manage' },
+    { label: 'Catalog & Deleted', path: '/catalog-admin', icon: Trash2, permission: ['test_catalog.manage', 'referrer.manage'] },
+    { label: 'Accounting', path: '/accounting', icon: Scale, permission: 'accounting.view' },
+    { label: 'Settings', path: '/settings', icon: Settings, permission: 'settings.manage' },
+    { label: 'Audit Log', path: '/audit-log', icon: ScrollText, permission: 'audit.view' },
+    { label: 'My Profile', path: '/profile', icon: UserCircle, permission: 'profile.manage' },
   ];
+  const navItems = allNavItems.filter((item) => {
+    if (!item.permission) return true;
+    const keys = Array.isArray(item.permission) ? item.permission : [item.permission];
+    return keys.some((k) => hasPermission(k));
+  });
 
   return (
     <aside
@@ -59,7 +77,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggleCollapse })
                 MedScope DCMS
               </span>
               <span className="text-[11px] text-[#C2C6A4] block truncate">
-                {role === 'ADMIN' || role === 'OWNER' ? 'Administration Portal' : role === 'LAB_TECH' ? 'Laboratory Workbench' : 'Receptionist Portal'}
+                {role === 'ADMIN' || role === 'OWNER' ? 'Administration Portal' : role === 'LAB_TECH' ? 'Laboratory Workbench' : role === 'DOCTOR' ? 'Doctor Workbench' : 'Receptionist Portal'}
               </span>
             </div>
           )}

@@ -95,6 +95,8 @@ CASHIER_AUTH_TOKEN = "test_token_cashier_fatima_2026"
 ADMIN_AUTH_TOKEN = "test_token_admin_tariq_2026"
 TECH_KAMAL_AUTH_TOKEN = "test_token_tech_kamal_2026"
 TECH_NASRIN_AUTH_TOKEN = "test_token_tech_nasrin_2026"
+OWNER_AUTH_TOKEN = "test_token_owner_tariq_2026"
+DOCTOR_AUTH_TOKEN = "test_token_doctor_rahim_2026"  # Prompt 15
 
 RECEPTIONIST_HEADERS = {
     "Authorization": f"Bearer {RECEPTIONIST_AUTH_TOKEN}",
@@ -118,6 +120,30 @@ TECH_KAMAL_HEADERS = {
     "Authorization": f"Bearer {TECH_KAMAL_AUTH_TOKEN}",
     "X-Requested-With": "XMLHttpRequest",
     "X-Tenant-Id": "center-seba-01",
+}
+
+OWNER_HEADERS = {
+    "Authorization": f"Bearer {OWNER_AUTH_TOKEN}",
+    "X-Requested-With": "XMLHttpRequest",
+    "X-Tenant-Id": "center-seba-01",
+}
+
+DOCTOR_HEADERS = {
+    "Authorization": f"Bearer {DOCTOR_AUTH_TOKEN}",
+    "X-Requested-With": "XMLHttpRequest",
+    "X-Tenant-Id": "center-seba-01",
+}
+
+# Prompt 10D: one login = one fixed role. The former dual-role accounts are split into
+# single-role users (cashier_fatima, owner_tariq), matching the d7e5a91c4f02 migration.
+SINGLE_ROLE_USERS = {
+    "reception_fatima": "RECEPTIONIST",
+    "admin_tariq": "ADMIN",
+    "tech_kamal": "LAB_TECH",
+    "tech_nasrin": "LAB_TECH",
+    "cashier_fatima": "CASHIER",
+    "owner_tariq": "OWNER",
+    "doctor_rahim": "DOCTOR",  # Prompt 15
 }
 
 
@@ -173,10 +199,6 @@ def setup_test_database():
                         code="HGB",
                         name="Hemoglobin",
                         unit="g/dL",
-                        ref_min=12.0,
-                        ref_max=16.0,
-                        critical_min=7.0,
-                        critical_max=20.0,
                         impossible_min=2.0,
                         impossible_max=25.0,
                         sort_order=1,
@@ -188,10 +210,6 @@ def setup_test_database():
                         code="WBC",
                         name="Total WBC Count",
                         unit="x10^3/uL",
-                        ref_min=4.0,
-                        ref_max=11.0,
-                        critical_min=2.0,
-                        critical_max=30.0,
                         impossible_min=0.5,
                         impossible_max=100.0,
                         sort_order=2,
@@ -203,10 +221,6 @@ def setup_test_database():
                         code="PLT",
                         name="Platelet Count",
                         unit="x10^3/uL",
-                        ref_min=150.0,
-                        ref_max=450.0,
-                        critical_min=50.0,
-                        critical_max=1000.0,
                         impossible_min=10.0,
                         impossible_max=2000.0,
                         sort_order=3,
@@ -214,50 +228,74 @@ def setup_test_database():
                     ),
                 ]
                 db.add_all(comps)
+                db.flush()
+                # Prompt 14 (D24): ranges live in reference_range_versions (version 1, any sex, all ages)
+                from backend.app.services.reference_range_service import add_first_version
+                for _c, (_rmin, _rmax, _cmin, _cmax) in zip(comps, [(12.0, 16.0, 7.0, 20.0), (4.0, 11.0, 2.0, 30.0), (150.0, 450.0, 50.0, 1000.0)]):
+                    add_first_version(db, cbc.tenant_id, _c, ref_min=_rmin, ref_max=_rmax, critical_min=_cmin, critical_max=_cmax, reference_range_text=None)
 
-        # 3b. Seed Argon2id passwords for existing staff
+        # 3b. Ensure the split single-role users exist (created by migration d7e5a91c4f02 on
+        #     databases that had dual-role accounts; created here on a fresh test DB).
+        from sqlalchemy import text
+        db.execute(text("SELECT setval('staff_id_seq', GREATEST((SELECT last_value FROM staff_id_seq), COALESCE((SELECT MAX(id) FROM staff), 1)))"))
+        db.execute(text("SELECT setval('staff_roles_id_seq', GREATEST((SELECT last_value FROM staff_roles_id_seq), COALESCE((SELECT MAX(id) FROM staff_roles), 1)))"))
+        extra_users = {
+            "cashier_fatima": ("Fatima Akter — Cashier", "CASHIER", "Front Desk"),
+            "owner_tariq": ("Tariqul Islam — Owner", "OWNER", "Administration"),
+            "doctor_rahim": ("Dr. Rahim — Doctor", "DOCTOR", "Doctor Chamber"),
+        }
+        for uname, (dname, r_name, dept) in extra_users.items():
+            if not db.execute(select(Staff).where(Staff.username == uname)).scalar_one_or_none():
+                db.add(Staff(tenant_id="center-seba-01", username=uname, display_name=dname, role=r_name, department=dept, active=True))
+        db.flush()
+
+        # 3c. Seed Argon2id passwords and exactly one role per user
         hashed_pwd = hash_password(TEST_PASSWORD_DEFAULT)
-        all_staff = db.execute(select(Staff)).scalars().all()
-        for s in all_staff:
+        staff_by_username = {s.username: s for s in db.execute(select(Staff)).scalars().all()}
+        for s in staff_by_username.values():
             s.password_hash = hashed_pwd
             s.failed_attempts = 0
             s.locked_at = None
+        for uname, r_name in SINGLE_ROLE_USERS.items():
+            st = staff_by_username[uname]
+            st.role = r_name
+            st.active = True
+            existing_role = db.execute(select(StaffRole).where(StaffRole.staff_id == st.id)).scalar_one_or_none()
+            if existing_role:
+                existing_role.role = r_name
+                existing_role.is_primary = True
+            else:
+                db.add(StaffRole(staff_id=st.id, role=r_name, is_primary=True, created_at=utc_now()))
+        db.flush()
 
-        # 3c. Seed Staff Roles
-        role_assignments = [
-            (1, "RECEPTIONIST", True),
-            (1, "CASHIER", False),
-            (2, "ADMIN", True),
-            (2, "OWNER", False),
-            (3, "LAB_TECH", True),
-            (4, "LAB_TECH", True),
-        ]
-        for staff_id, r_name, is_pri in role_assignments:
-            existing_role = db.execute(
-                select(StaffRole).where(StaffRole.staff_id == staff_id, StaffRole.role == r_name)
-            ).scalar_one_or_none()
-            if not existing_role:
-                db.add(StaffRole(
-                    staff_id=staff_id,
-                    role=r_name,
-                    is_primary=is_pri,
-                    created_at=utc_now(),
-                ))
+        # 3c2. Prompt 15: link the seeded DOCTOR login to a seed doctor profile that has a registration number
+        from backend.app.models.referrer import Referrer
+        _doc_profile = db.execute(
+            select(Referrer).where(Referrer.tenant_id == "center-seba-01", Referrer.referrer_type == "Consultant",
+                                   Referrer.registration_no.is_not(None), Referrer.deleted_at.is_(None)).order_by(Referrer.id)
+        ).scalars().first()
+        assert _doc_profile is not None, "seed doctor profile with a registration number missing"
+        staff_by_username["doctor_rahim"].doctor_profile_id = _doc_profile.id
+        db.flush()
 
-        # 3d. Seed Deterministic Active Test Sessions
+        # 3d. Seed Deterministic Active Test Sessions (bound by username)
         test_sessions_data = [
-            (1, RECEPTIONIST_AUTH_TOKEN, "RECEPTIONIST"),
-            (1, CASHIER_AUTH_TOKEN, "CASHIER"),
-            (2, ADMIN_AUTH_TOKEN, "ADMIN"),
-            (3, TECH_KAMAL_AUTH_TOKEN, "LAB_TECH"),
-            (4, TECH_NASRIN_AUTH_TOKEN, "LAB_TECH"),
+            ("reception_fatima", RECEPTIONIST_AUTH_TOKEN, "RECEPTIONIST"),
+            ("cashier_fatima", CASHIER_AUTH_TOKEN, "CASHIER"),
+            ("admin_tariq", ADMIN_AUTH_TOKEN, "ADMIN"),
+            ("tech_kamal", TECH_KAMAL_AUTH_TOKEN, "LAB_TECH"),
+            ("tech_nasrin", TECH_NASRIN_AUTH_TOKEN, "LAB_TECH"),
+            ("owner_tariq", OWNER_AUTH_TOKEN, "OWNER"),
+            ("doctor_rahim", DOCTOR_AUTH_TOKEN, "DOCTOR"),
         ]
-        for staff_id, raw_tok, acting_r in test_sessions_data:
+        for uname, raw_tok, acting_r in test_sessions_data:
+            staff_id = staff_by_username[uname].id
             tok_hash = hashlib.sha256(raw_tok.encode("utf-8")).hexdigest()
             existing_session = db.execute(
                 select(AuthSession).where(AuthSession.session_token_hash == tok_hash)
             ).scalar_one_or_none()
             if existing_session:
+                existing_session.staff_id = staff_id
                 existing_session.revoked_at = None
                 existing_session.expires_at = utc_now() + timedelta(days=7)
                 existing_session.acting_role = acting_r
@@ -277,15 +315,28 @@ def setup_test_database():
                     ip_address="127.0.0.1",
                 ))
 
+        # 3d2. Remove per-user permission overrides left by earlier test runs (test DB only)
+        from backend.app.models.user import StaffPermissionOverride
+        for o in db.execute(select(StaffPermissionOverride)).scalars().all():
+            db.delete(o)
+
         # 3e. Synchronize sequences to prevent duplicate key errors on inserts
-        from sqlalchemy import text
-        db.execute(text("SELECT setval('staff_id_seq', COALESCE((SELECT MAX(id) FROM staff), 1))"))
-        db.execute(text("SELECT setval('staff_roles_id_seq', COALESCE((SELECT MAX(id) FROM staff_roles), 1))"))
+        db.execute(text("SELECT setval('staff_id_seq', GREATEST((SELECT last_value FROM staff_id_seq), COALESCE((SELECT MAX(id) FROM staff), 1)))"))
+        db.execute(text("SELECT setval('staff_roles_id_seq', GREATEST((SELECT last_value FROM staff_roles_id_seq), COALESCE((SELECT MAX(id) FROM staff_roles), 1)))"))
         db.commit()
     finally:
         db.close()
 
     yield test_engine
+
+    # Prompt 12: tests create throwaway users (random-suffix usernames) through the API and commit them,
+    # so a per-test rollback is not possible. Remove them at the end of the session (hard delete,
+    # medscope_test only; the database name is asserted inside the helper).
+    # Prompt 13A: same mechanism for the throwaway referrers (so GET /referrers stays small).
+    from tests.fixture_cleanup import purge_fixture_staff, purge_fixture_referrers
+    with test_engine.begin() as _conn:
+        purge_fixture_staff(_conn)
+        purge_fixture_referrers(_conn)
 
 
 # ---------------------------------------------------------------------------
@@ -323,3 +374,21 @@ def db_session(setup_test_database):
         yield session
     finally:
         session.close()
+
+
+@pytest.fixture(autouse=True)
+def _ensure_open_business_day(client):
+    """Prompt 18B: payments, bill confirmation and refund payout now need an OPEN business day, and a new day cannot be
+    opened while one is REOPENED. So every test starts with exactly one OPEN day: days an earlier test left REOPENED are
+    put back to CLOSED (test-database state repair), then a day is opened if none is OPEN. Tests of the closed /
+    reopened rules set their own state."""
+    st = client.get("/business-day/status", headers=RECEPTIONIST_HEADERS).json()
+    if not st.get("is_open"):
+        from sqlalchemy import text
+        from backend.app.core.database import SessionLocal
+        with SessionLocal() as db:
+            assert db.execute(text("SELECT current_database()")).scalar() == "medscope_test"
+            db.execute(text("UPDATE business_days SET status = 'CLOSED' WHERE status = 'REOPENED'"))
+            db.commit()
+        client.post("/business-day/open", headers=RECEPTIONIST_HEADERS, json={"opening_float": 0})
+    yield

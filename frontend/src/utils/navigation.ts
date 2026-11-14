@@ -1,23 +1,12 @@
 /**
- * MedScope DCMS — Role Home Route Resolver
+ * MedScope DCMS — Home Route Resolver
  *
- * Directs authenticated staff to their designated initial operational workbench:
- * - RECEPTIONIST / CASHIER: Invoices workbench (/invoices)
- * - LAB_TECH: Technician Worklist (/worklist)
- * - ADMIN / OWNER: Executive Operations Dashboard (/dashboard)
+ * Prompt 10D (ADL-033): every login lands on the Dashboard, whatever the role.
+ * The Dashboard shows each role only what it may see, plus a link to its main work page.
+ * The role argument is kept so existing call sites stay unchanged.
  */
 
-export function getRoleHomeRoute(role?: string | null): string {
-  switch (role) {
-    case 'RECEPTIONIST':
-    case 'CASHIER':
-      return '/invoices';
-    case 'LAB_TECH':
-      return '/worklist';
-    case 'ADMIN':
-    case 'OWNER':
-    default:
-      return '/dashboard';
-  }
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function getRoleHomeRoute(_role?: string | null): string {
+  return '/dashboard';
 }
-

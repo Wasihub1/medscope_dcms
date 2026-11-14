@@ -1,11 +1,12 @@
 export type Gender = 'MALE' | 'FEMALE' | 'OTHER';
 export type PaymentStatus = 'PAID' | 'PARTIAL' | 'DUE' | 'REFUNDED' | 'CANCELLED';
 export type DiscountType = 'PERCENT' | 'FIXED' | 'NONE';
-export type PaymentChannel = 'CASH' | 'BKASH' | 'NAGAD' | 'ROCKET' | 'CARD' | 'BANK_TRANSFER';
+/** Prompt 10E: exactly the backend channels. The label "Card" is POS_CARD; OTHER needs a typed name. */
+export type PaymentChannel = 'CASH' | 'BKASH' | 'NAGAD' | 'ROCKET' | 'POS_CARD' | 'BANK_TRANSFER' | 'OTHER';
 export type BusinessDayStatus = 'OPEN' | 'CLOSED';
 export type RefundStatus = 'PENDING_ADMIN_APPROVAL' | 'APPROVED' | 'REJECTED' | 'COMPLETED';
 export type ReportStatus = 'DRAFT' | 'PRELIMINARY' | 'AUTHORIZED' | 'DELIVERED';
-export type Role = 'RECEPTIONIST' | 'ADMIN' | 'CASHIER' | 'LAB_TECH' | 'OWNER';
+export type Role = 'RECEPTIONIST' | 'ADMIN' | 'CASHIER' | 'LAB_TECH' | 'OWNER' | 'DOCTOR';
 
 export interface Patient {
   id: string;
@@ -20,6 +21,9 @@ export interface Patient {
   age_years?: number | null;
   age_months?: number | null;
   age_days?: number | null;
+  /** Prompt 10E: age from the latest visit snapshot (New Invoice prefill) */
+  last_age_value?: number | null;
+  last_age_unit?: string | null;
   address?: string | null;
   blood_group?: string | null;
   national_id?: string | null;
@@ -130,6 +134,9 @@ export interface InvoiceLine {
   net_amount: number;
   is_urgent: boolean;
   urgent_fee: number;
+  /** Prompt 10E: backend-computed urgent fee of this line (informational, never refunded) */
+  line_urgent_fee?: number;
+  lab_section?: string | null;
   sample_collected: boolean;
   sample_status?: string | null;
   is_locked?: boolean;
@@ -137,6 +144,11 @@ export interface InvoiceLine {
   outcome?: string | null;
   d15_refund_status?: string | null;
   d15_refund_reason?: string | null;
+  /** Prompt 13: NONE | CANCELLATION_REQUESTED | CANCELLED_REFUND_PENDING | CANCELLED | CANCELLED_REFUNDED */
+  cancellation_state?: string;
+  /** Prompt 13: label to show; cancellation/refund states take precedence over the sample status */
+  display_status?: string | null;
+  can_request_cancellation?: boolean;
   sample_id?: string | null;
   test_order_id?: string | null;
   assigned_destination_id?: string | null;
@@ -192,6 +204,16 @@ export interface Invoice {
   is_reprint?: boolean;
   is_duplicate_reprint?: boolean;
   reprint_count?: number;
+  /** Prompt 10D: DRAFT or CONFIRMED (CANCELLED reserved). */
+  status?: string;
+  is_draft?: boolean;
+  draft_payload?: Record<string, any> | null;
+  finalized_at?: string | null;
+  /** Prompt 10E: backend urgent fee (part of net) and the visit snapshot */
+  urgent_fee?: number;
+  age_value?: number | null;
+  age_unit?: string | null;
+  visit_gender?: string | null;
 }
 
 export interface InvoiceSummary {
@@ -213,6 +235,8 @@ export interface InvoiceSummary {
   lines_count: number;
   created_at: string;
   created_by_name?: string | null;
+  status?: string;
+  is_draft?: boolean;
 }
 
 export interface UnassignedTestOrder {
@@ -233,6 +257,49 @@ export interface UnassignedTestOrder {
   assigned_destination_id?: string | null;
   assigned_destination_name?: string | null;
   assigned_staff_id?: string | null;
+  lab_section?: string | null;
+  lab_section_label?: string | null;
+}
+
+/** Prompt 10E: a lab room (routing target) */
+export interface LabRoom {
+  code: string;
+  name: string;
+  room: string;
+  destination: string;
+  label?: string | null;
+  active_technicians: number;
+}
+
+/** Prompt 13: read-only cancellation numbers from the single backend calculation (whole taka). */
+export interface CancellationBreakdown {
+  invoice_line_id: number;
+  test_name: string;
+  invoice_total: number;
+  paid_total: number;
+  line_price: number;
+  retained_amount: number;
+  refund_amount: number;
+  due_after: number;
+  net_after: number;
+  can_request: boolean;
+  blocker?: string | null;
+  snapshot_refund_amount?: number | null;
+  differs_from_snapshot?: boolean | null;
+}
+
+export interface InvoiceCancellationBreakdown {
+  invoice_id: number;
+  can_cancel: boolean;
+  blocker?: string | null;
+  blocker_message?: string | null;
+  invoice_total: number;
+  paid_total: number;
+  lines: { invoice_line_id: number; test_name: string; line_price: number; refund_amount: number }[];
+  total_refund: number;
+  retained_amount: number;
+  due_after: number;
+  net_after: number;
 }
 
 export interface RefundRequestItem {
@@ -281,6 +348,8 @@ export interface DeliverableReportItem {
   delivered_to_name?: string | null;
   delivered_to_relation?: string | null;
   can_deliver: boolean;
+  has_snapshot?: boolean;
+  approval_rule?: string | null;
 }
 
 export interface ChannelBalance {
@@ -288,6 +357,13 @@ export interface ChannelBalance {
   opening_balance: number;
   current_balance: number;
   collections_count: number;
+}
+
+/** Prompt 13B: money-free open/closed state, readable by every role (incl. Lab Tech). */
+export interface BusinessDayState {
+  is_open: boolean;
+  day_number?: number | null;
+  business_date?: string | null;
 }
 
 export interface BusinessDay {
@@ -395,6 +471,12 @@ export interface TechnicianWorklistItem {
   lab_clock_display?: string | null;
   is_late: boolean;
   late_reason?: string | null;
+  /** Prompt 10E */
+  requires_sample?: boolean;
+  is_imaging?: boolean;
+  lab_section?: string | null;
+  lab_section_label?: string | null;
+  report_ready?: boolean;
 }
 
 export interface WorklistSummary {
@@ -412,6 +494,9 @@ export interface WorklistSummary {
   culture_count?: number;
   imaging_count?: number;
   outsourced_count?: number;
+  ready_count?: number;
+  unassigned_count?: number;
+  lab_section?: string | null;
 }
 
 export interface BarcodeLabelData {
@@ -459,6 +544,53 @@ export interface TestComponent {
   impossible_min?: number | null;
   impossible_max?: number | null;
   sort_order: number;
+  /** Prompt 14 (D24): band chosen for this patient (sex + age in days) and how it matched */
+  reference_range_version_id?: number | null;
+  range_match?: 'MATCHED' | 'FALLBACK_ANY' | 'NO_BAND' | null;
+}
+
+export interface RangeVersion {
+  id: number;
+  test_component_id: number;
+  sex: 'ANY' | 'MALE' | 'FEMALE';
+  age_days_min: number;
+  age_days_max?: number | null;
+  ref_min?: number | null;
+  ref_max?: number | null;
+  critical_min?: number | null;
+  critical_max?: number | null;
+  reference_range_text?: string | null;
+  version_no: number;
+  is_current: boolean;
+  effective_from: string;
+  retired_at?: string | null;
+  change_note?: string | null;
+}
+
+export interface ComponentRanges {
+  component_id: number;
+  code: string;
+  name: string;
+  unit?: string | null;
+  versions: RangeVersion[];
+}
+
+export interface TestRanges {
+  test_id: number;
+  test_name: string;
+  components: ComponentRanges[];
+}
+
+export interface RangeBandInput {
+  sex?: string;
+  age_days_min?: number;
+  age_days_max?: number | null;
+  ref_min?: number | null;
+  ref_max?: number | null;
+  critical_min?: number | null;
+  critical_max?: number | null;
+  reference_range_text?: string | null;
+  note?: string | null;
 }
 
 export interface ComponentResultInput {
@@ -520,6 +652,7 @@ export interface ResultRecord {
   entered_by_name?: string | null;
   entered_at: string;
   updated_at: string;
+  updated_by_name?: string | null;
   items: ResultItem[];
 }
 
@@ -548,12 +681,67 @@ export interface AuthUser {
   tenant_id: string;
   username: string;
   display_name: string;
+  /** Prompt 10D: always exactly one role */
   roles: Role[];
   acting_role: Role;
+  role?: Role;
   department?: string | null;
+  lab_section?: string | null;
   email?: string | null;
   phone?: string | null;
   home_route: string;
+  /** Prompt 10D: effective permission keys (role defaults + per-user overrides) */
+  permissions?: string[];
+}
+
+// Prompt 10D Part 5: user management
+export interface PermissionDef {
+  key: string;
+  label: string;
+  group: string;
+  exposes_money: boolean;
+}
+
+export interface LabSection {
+  code: string;
+  name: string;
+  room: string;
+  label: string;
+}
+
+export interface UserAdminMeta {
+  roles: Role[];
+  permissions: PermissionDef[];
+  role_defaults: Record<string, string[]>;
+  money_restricted_roles: string[];
+  lab_sections: LabSection[];
+}
+
+export interface ManagedUser {
+  id: number;
+  username: string;
+  display_name: string;
+  role: Role;
+  department?: string | null;
+  lab_section?: string | null;
+  lab_section_label?: string | null;
+  doctor_profile_id?: number | null;
+  doctor_profile_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  active: boolean;
+  is_locked: boolean;
+  last_login_at?: string | null;
+  override_count: number;
+}
+
+export interface ManagedUserDetail extends ManagedUser {
+  permissions: {
+    role: Role;
+    defaults: string[];
+    overrides: Record<string, boolean>;
+    effective: string[];
+  };
 }
 
 export interface AuthMessageResponse {
@@ -564,3 +752,336 @@ export interface AuthMessageResponse {
 
 
 
+
+/** Prompt 10F (F1): one row of the Assigned Tests view. Money-free by design. */
+export interface AssignedTestOrder {
+  test_order_id: number;
+  invoice_id: number;
+  invoice_no: string;
+  patient_id: number;
+  patient_name: string;
+  patient_code: string;
+  test_code: string;
+  test_name: string;
+  department?: string | null;
+  lab_section?: string | null;
+  lab_section_label?: string | null;
+  /** Active technicians of the room; empty when the order is UNASSIGNED */
+  technician_names: string[];
+  assignment_state: 'ASSIGNED' | 'UNASSIGNED';
+  status: string;
+  urgent: boolean;
+  result_status?: string | null;
+  worked_by_name?: string | null;
+  created_at: string;
+  can_reassign: boolean;
+  reassign_block_reason?: string | null;
+}
+
+/** Prompt 10F (F3): a Ready result (ENTERED, not issued). Due keys only for money-permitted roles. */
+export interface ReadyReportItem {
+  test_order_id: number;
+  invoice_id: number;
+  invoice_no: string;
+  patient_id: number;
+  patient_name: string;
+  patient_code: string;
+  patient_phone?: string | null;
+  test_code: string;
+  test_name: string;
+  department?: string | null;
+  lab_section?: string | null;
+  lab_section_label?: string | null;
+  order_status: string;
+  urgent?: boolean;
+  result_status: string;
+  result_entered_at?: string | null;
+  result_entered_by_name?: string | null;
+  approval_rule?: string | null;
+  doctor_approved?: boolean;
+  can_finalize?: boolean;
+  finalize_blocker?: string | null;
+  has_due?: boolean;
+  invoice_due?: number;
+}
+
+/** Prompt 10F (F2): read-only preview of a saved result (stored snapshots only). */
+export interface ResultPreviewItem {
+  component_name: string;
+  component_code?: string | null;
+  value: string;
+  unit?: string | null;
+  reference_range?: string | null;
+  ref_min?: number | null;
+  ref_max?: number | null;
+  critical_min?: number | null;
+  critical_max?: number | null;
+  flag?: string | null;
+  comment?: string | null;
+}
+
+export interface ResultPreview {
+  test_order_id: number;
+  invoice_no: string;
+  patient_name: string;
+  patient_code: string;
+  patient_gender?: string | null;
+  patient_age?: string | null;
+  test_code: string;
+  test_name: string;
+  department?: string | null;
+  lab_section_label?: string | null;
+  sample_code?: string | null;
+  sample_type?: string | null;
+  sample_collected_at?: string | null;
+  order_status: string;
+  report_template?: string | null;
+  result_status: string;
+  is_draft: boolean;
+  is_ready: boolean;
+  findings?: string | null;
+  impression?: string | null;
+  comments?: string | null;
+  structured_data?: Record<string, string> | null;
+  entered_by_name?: string | null;
+  entered_at?: string | null;
+  updated_at?: string | null;
+  // Prompt 16 (Module 14)
+  approval_rule?: string | null;
+  doctor_approved?: boolean;
+  report_status?: 'NONE' | 'FINAL';
+  report_version_id?: number | null;
+  report_no?: string | null;
+  can_finalize?: boolean;
+  finalize_blocker?: string | null;
+  signatures?: {
+    technician?: { name?: string | null; role?: string | null; signed_at?: string | null } | null;
+    doctor?: { name?: string | null; registration_no?: string | null; approved_at?: string | null; recorded_by_role?: string | null; is_attestation?: boolean } | null;
+  } | null;
+  items: ResultPreviewItem[];
+}
+
+export interface FinalizeReportResult {
+  report_version_id: number;
+  report_no: string;
+  version: number;
+  status: string;
+  finalized_at: string;
+  finalized_by_name?: string | null;
+  test_order_id: number;
+}
+
+// Prompt 11: soft delete / audit log
+export interface DeletedItem {
+  id: number;
+  kind: 'USER' | 'REFERRER' | 'TEST';
+  title: string;
+  subtitle?: string | null;
+  deleted_at: string;
+  deleted_by_id?: number | null;
+  deleted_by_name?: string | null;
+  delete_reason?: string | null;
+}
+export interface AuditLogItem {
+  id: number;
+  created_at: string;
+  actor_id?: number | null;
+  actor_name?: string | null;
+  acting_role: string;
+  action: string;
+  domain: string;
+  entity_type: string;
+  entity_id: string;
+  reason?: string | null;
+  before_value?: string | null;
+  after_value?: string | null;
+}
+export interface AuditLogPage { items: AuditLogItem[]; total: number; page: number; size: number; pages: number }
+export interface AuditLogMeta {
+  actions: string[];
+  entity_types: string[];
+  domains: { key: string; label: string }[];
+  roles: string[];
+  actors: { id: number; name: string }[];
+}
+export interface AuditLogQuery {
+  action?: string; entity_type?: string; actor_id?: number; domain?: string; acting_role?: string; q?: string;
+  date_from?: string; date_to?: string; page?: number; size?: number;
+}
+
+// Prompt 15 (D22): doctor sign-off
+export interface DoctorRef {
+  id: number;
+  name: string;
+  registration_no?: string | null;
+  specialty?: string | null;
+}
+
+export interface ApprovalQueueItem {
+  test_order_id: number;
+  invoice_no: string;
+  patient_name: string;
+  patient_code: string;
+  test_code: string;
+  test_name: string;
+  department?: string | null;
+  lab_section_label?: string | null;
+  approval_rule: 'DOCTOR_REQUIRED' | 'BOTH_SIGNATURES' | string;
+  order_status: string;
+  urgent: boolean;
+  technician_name?: string | null;
+  result_entered_at?: string | null;
+  assigned_doctor?: DoctorRef | null;
+}
+
+export interface ApprovalQueue {
+  scope: 'OWN' | 'ALL';
+  my_doctor?: DoctorRef | null;
+  items: ApprovalQueueItem[];
+}
+
+export interface ApprovalRecord {
+  id: number;
+  doctor: DoctorRef;
+  approved_by_user_id: number;
+  approved_by_name?: string | null;
+  approved_by_role: string;
+  is_attestation: boolean;
+  notes?: string | null;
+  approved_at: string;
+}
+
+export interface ApprovalDetail {
+  test_order_id: number;
+  approval_rule: string;
+  order_status: string;
+  path: 'DOCTOR_OWN' | 'STAFF_ATTESTATION';
+  can_approve: boolean;
+  blocked_reason?: string | null;
+  technician_name?: string | null;
+  technician_signed_at?: string | null;
+  assigned_doctor?: DoctorRef | null;
+  my_doctor?: DoctorRef | null;
+  approval?: ApprovalRecord | null;
+  preview: ResultPreview;
+}
+
+// Prompt 17 (Modules 17 / 18)
+export interface CenterSettings {
+  report_hold_when_due: boolean;
+  writeoff_admin_limit: number;
+  cash_variance_tolerance: number;
+}
+
+// Prompt 18 (Module 22): day screen (Admin/Owner)
+export interface DayChannelLine {
+  channel: string;
+  opening: number;
+  collections: number;
+  refunds: number;
+  paid_out: number;
+  expected: number;
+  counted: number | null;
+  variance: number | null;
+}
+
+export interface DayScreen {
+  day: null | {
+    id: number;
+    day_number: number;
+    status: 'OPEN' | 'CLOSED' | 'REOPENED';
+    opened_at: string;
+    closed_at: string | null;
+    opening_cash: number;
+    counted_cash: number | null;
+    variance: number | null;
+    variance_reason: string | null;
+    reopen_reason: string | null;
+    reopened_at: string | null;
+  };
+  tolerance: number;
+  unsynced_items: number;
+  channels?: DayChannelLine[];
+  cash?: {
+    opening_cash: number;
+    cash_collections: number;
+    cash_refunds: number;
+    bank_deposits: number;
+    owner_withdrawals: number;
+    expenses: number;
+    adjusting_entries: number;
+    deferred_payouts: Record<string, number>;
+    expected_cash: number;
+  };
+  movements?: { id: number; kind: string; amount: number; note: string | null; created_at: string }[];
+}
+
+export interface JournalEntryRow {
+  id: number;
+  date: string;
+  event: string;
+  memo: string | null;
+  business_day_id: number | null;
+  reverses_entry_id: number | null;
+  is_adjustment: boolean;
+  lines: { account: string; debit: number; credit: number }[];
+}
+
+export interface DuesCallListInvoice {
+  invoice_id: number;
+  invoice_no: string;
+  due: number;
+  age_days: number;
+  age_bucket: string;
+}
+
+export interface DuesCallListPatient {
+  patient_id: number;
+  patient_code: string;
+  patient_name: string;
+  patient_phone: string;
+  total_due: number;
+  invoice_count: number;
+  oldest_age_days: number;
+  age_bucket: string;
+  invoices: DuesCallListInvoice[];
+}
+
+export interface DuesCallList {
+  bucket_totals: Record<string, number>;
+  total_due: number;
+  patients: DuesCallListPatient[];
+}
+
+export interface WriteOffRecord {
+  id: number;
+  invoice_id: number;
+  invoice_no?: string | null;
+  patient_name?: string | null;
+  amount: number;
+  reason: string;
+  status: 'APPLIED' | 'PENDING_OWNER' | 'REJECTED';
+  admin_limit_at_request: number;
+  requested_by_name?: string | null;
+  requested_by_role: string;
+  decided_by_name?: string | null;
+  decided_at?: string | null;
+  decision_note?: string | null;
+  created_at: string;
+  invoice_due_now?: number | null;
+}
+
+export interface DoctorBalanceRow {
+  referrer_id: number;
+  name: string;
+  registration_no?: string | null;
+  wholesale_receivable: number;
+  professional_fee_payable: number;
+  last_entry_at?: string | null;
+}
+
+export interface DoctorBalances {
+  items: DoctorBalanceRow[];
+  entry_count: number;
+  note: string;
+}

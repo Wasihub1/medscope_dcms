@@ -11,11 +11,14 @@ import {
   Filter,
 } from 'lucide-react';
 import { api } from '../../api/client';
-import { RefundRequestItem } from '../../types';
+import { RefundRequestItem, CancellationBreakdown } from '../../types';
+import { announceInvoiceChange } from '../../utils/sampleChangeEvents';
 import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { PAYMENT_CHANNEL_OPTIONS } from '../../utils/paymentChannels';
+import type { PaymentChannel } from '../../types';
 
 export const RefundsPage: React.FC = () => {
   const [refunds, setRefunds] = useState<RefundRequestItem[]>([]);
@@ -27,12 +30,15 @@ export const RefundsPage: React.FC = () => {
   const [selectedRefund, setSelectedRefund] = useState<RefundRequestItem | null>(null);
   const [reviewDecision, setReviewDecision] = useState<'APPROVED' | 'REJECTED'>('APPROVED');
   const [rejectionReason, setRejectionReason] = useState('');
+  // Prompt 13: live recalculation (same backend function) shown beside the request-time snapshot
+  const [reviewBreakdown, setReviewBreakdown] = useState<CancellationBreakdown | null>(null);
   const [submittingReview, setSubmittingReview] = useState(false);
 
   // Disburse Modal State (FIX 4)
   const [disburseModalOpen, setDisburseModalOpen] = useState(false);
   const [selectedDisburseRefund, setSelectedDisburseRefund] = useState<RefundRequestItem | null>(null);
-  const [disburseMethod, setDisburseMethod] = useState<'CASH' | 'BKASH' | 'NAGAD' | 'ROCKET' | 'BANK_TRANSFER'>('CASH');
+  // Prompt 10E: exactly the backend channels; the refund must use a channel used on the invoice
+  const [disburseMethod, setDisburseMethod] = useState<PaymentChannel>('CASH');
   const [disburseRef, setDisburseRef] = useState('');
   const [submittingDisburse, setSubmittingDisburse] = useState(false);
 
@@ -59,14 +65,20 @@ export const RefundsPage: React.FC = () => {
     setSelectedRefund(refund);
     setReviewDecision(decision);
     setRejectionReason('');
+    setReviewBreakdown(null);
     setReviewModalOpen(true);
+    if (decision === 'APPROVED') {
+      api.getRefundBreakdown(refund.id).then(setReviewBreakdown).catch(() => setReviewBreakdown(null));
+    }
   };
 
   const handleConfirmReview = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRefund) return;
-    if (reviewDecision === 'REJECTED' && !rejectionReason.trim()) {
-      showToast({ type: 'error', title: 'Rejection Reason Required', message: 'Please specify reason for rejection.' });
+    // Rejection always needs a reason; approving a pre-lock cancellation needs one too (D15 keeps it optional).
+    const reasonRequired = reviewDecision === 'REJECTED' || selectedRefund.request_type !== 'D15_NOT_PERFORMED';
+    if (reasonRequired && !rejectionReason.trim()) {
+      showToast({ type: 'error', title: 'Reason Required', message: 'Please enter a reason.' });
       return;
     }
 
@@ -74,16 +86,17 @@ export const RefundsPage: React.FC = () => {
     try {
       await api.reviewRefund(selectedRefund.id, {
         status: reviewDecision,
-        rejection_reason: reviewDecision === 'REJECTED' ? rejectionReason.trim() : undefined,
+        rejection_reason: rejectionReason.trim() || undefined,
       });
 
       showToast({
         type: reviewDecision === 'APPROVED' ? 'success' : 'info',
         title: `Refund ${reviewDecision === 'APPROVED' ? 'Approved' : 'Rejected'}`,
-        message: `Refund request for ৳${selectedRefund.amount} has been ${reviewDecision.toLowerCase()}.`,
+        message: `The cancellation request has been ${reviewDecision.toLowerCase()}.`,
       });
 
       setReviewModalOpen(false);
+      announceInvoiceChange();
       fetchRefunds();
     } catch (err: any) {
       showToast({ type: 'error', title: 'Review Failed', message: err.message });
@@ -114,6 +127,7 @@ export const RefundsPage: React.FC = () => {
         message: `Payout of ৳${selectedDisburseRefund.amount} disbursed via ${disburseMethod}.`,
       });
       setDisburseModalOpen(false);
+      announceInvoiceChange();
       fetchRefunds();
     } catch (err: any) {
       showToast({ type: 'error', title: 'Disbursement Failed', message: err.message });
@@ -129,7 +143,7 @@ export const RefundsPage: React.FC = () => {
         <div>
           <h1 className="text-xl font-bold text-[#1B1B0E]">Pre-Sample Refund Requests</h1>
           <p className="text-xs text-[#6D6A60]">
-            Track cancellation requests initiated before specimen collection. Admin approval required for final payout.
+            Pre-sample cancellations take effect at once (no approval). Only D15 Not Performed requests wait for Admin/Owner approval; payouts are recorded here.
           </p>
         </div>
 
@@ -288,7 +302,7 @@ export const RefundsPage: React.FC = () => {
         isOpen={reviewModalOpen}
         onClose={() => setReviewModalOpen(false)}
         title={reviewDecision === 'APPROVED' ? 'Approve Refund Request' : 'Reject Refund Request'}
-        subtitle={`Invoice: ${selectedRefund?.invoice_number} | Amount: ৳${selectedRefund?.amount}`}
+        subtitle={`Invoice: ${selectedRefund?.invoice_number} | ${selectedRefund?.test_name || ""}`}
         maxWidth="md"
       >
         <form onSubmit={handleConfirmReview} className="space-y-4 text-xs">
@@ -309,19 +323,33 @@ export const RefundsPage: React.FC = () => {
             </p>
           </div>
 
-          {reviewDecision === 'REJECTED' && (
-            <div>
-              <label className="block text-[#54524A] font-semibold mb-1">Rejection Reason *</label>
-              <textarea
-                required
-                rows={3}
-                value={rejectionReason}
-                onChange={(e) => setRejectionReason(e.target.value)}
-                placeholder="Explain why the cancellation refund cannot be granted..."
-                className="w-full p-2.5 bg-white border border-[#CAC7BE] rounded-xl outline-none"
-              />
-            </div>
+          {reviewDecision === 'APPROVED' && reviewBreakdown && (
+            <dl className="border border-[#DCDAD4] rounded-xl divide-y divide-[#E8E7E3]" data-testid="review-breakdown">
+              <div className="flex justify-between px-3 py-2"><dt className="text-[#6D6A60]">Invoice total</dt><dd className="font-semibold">৳{reviewBreakdown.invoice_total.toLocaleString()}</dd></div>
+              <div className="flex justify-between px-3 py-2"><dt className="text-[#6D6A60]">Paid so far</dt><dd className="font-semibold">৳{reviewBreakdown.paid_total.toLocaleString()}</dd></div>
+              <div className="flex justify-between px-3 py-2"><dt className="text-[#6D6A60]">This line&apos;s price</dt><dd className="font-semibold">৳{reviewBreakdown.line_price.toLocaleString()}</dd></div>
+              <div className="flex justify-between px-3 py-2"><dt className="text-[#6D6A60]">Amount retained</dt><dd className="font-semibold">৳{reviewBreakdown.retained_amount.toLocaleString()}</dd></div>
+              <div className="flex justify-between px-3 py-2 bg-[#FDF2F0]"><dt className="font-bold text-[#9C2417]">Refund amount (live, binding)</dt><dd className="font-extrabold text-[#9C2417]">৳{reviewBreakdown.refund_amount.toLocaleString()}</dd></div>
+              <div className="flex justify-between px-3 py-2"><dt className="text-[#6D6A60]">New due after this line is removed</dt><dd className="font-semibold">৳{reviewBreakdown.due_after.toLocaleString()}</dd></div>
+              <div className="flex justify-between px-3 py-2"><dt className="text-[#6D6A60]">Refund amount when requested</dt><dd className="font-semibold">৳{(reviewBreakdown.snapshot_refund_amount ?? 0).toLocaleString()}</dd></div>
+              {reviewBreakdown.differs_from_snapshot && (
+                <div className="px-3 py-2 text-[#8A5608] bg-[#FEF7EC]">The live amount differs from the amount at request time. The live amount is what will be applied.</div>
+              )}
+            </dl>
           )}
+
+          <div>
+            <label className="block text-[#54524A] font-semibold mb-1">
+              {reviewDecision === 'REJECTED' ? 'Rejection Reason *' : selectedRefund?.request_type === 'D15_NOT_PERFORMED' ? 'Approval note (optional)' : 'Approval reason *'}
+            </label>
+            <textarea
+              rows={3}
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              placeholder={reviewDecision === 'REJECTED' ? 'Explain why the cancellation cannot be granted...' : 'Why is this cancellation approved?'}
+              className="w-full p-2.5 bg-white border border-[#CAC7BE] rounded-xl outline-none"
+            />
+          </div>
 
           <div className="flex justify-end gap-2 pt-3 border-t border-[#E8E7E3]">
             <button
@@ -370,15 +398,12 @@ export const RefundsPage: React.FC = () => {
             <label className="block text-[#54524A] font-semibold mb-1">Disbursement Channel *</label>
             <select
               value={disburseMethod}
-              onChange={(e) => setDisburseMethod(e.target.value as any)}
+              onChange={(e) => setDisburseMethod(e.target.value as PaymentChannel)}
               className="w-full p-2.5 bg-white border border-[#CAC7BE] rounded-xl font-semibold"
             >
-              <option value="CASH">Cash (Cash Drawer)</option>
-              <option value="BKASH">bKash MFS</option>
-              <option value="NAGAD">Nagad MFS</option>
-              <option value="ROCKET">Rocket MFS</option>
-              <option value="CARD">Debit / Credit Card</option>
-              <option value="BANK_TRANSFER">Bank Transfer</option>
+              {PAYMENT_CHANNEL_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
             </select>
           </div>
 

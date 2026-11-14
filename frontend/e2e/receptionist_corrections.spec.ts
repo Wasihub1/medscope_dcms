@@ -1,16 +1,22 @@
 import { test, expect } from '@playwright/test';
+import { loginAs, openAs } from './support/auth';
 
-test.describe('MedScope Receptionist Corrections E2E Suite (Prompt 04)', () => {
+/**
+ * NOTE (Prompt 10D): this suite CREATES records (patients, doctors, referrers, invoices).
+ * It must only be run against a disposable database, never the main development DB.
+ * Login: one login = one fixed role; every login lands on /dashboard (see e2e/support/auth.ts).
+ */
+test.describe('MedScope Receptionist Corrections E2E Suite (Prompt 04, updated Prompt 10D)', () => {
   test.beforeEach(async ({ page }) => {
-    // Navigate to homepage
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
+    // Sign in as the receptionist; every login lands on the Dashboard
+    await loginAs(page, 'RECEPTIONIST');
   });
 
   // -------------------------------------------------------------------------
   // Item 08 & 09: Inline Global Search & Ctrl+F shortcut (No Modal, No Ctrl+K)
   // -------------------------------------------------------------------------
   test('08 & 09: Inline global search and Ctrl+F keyboard shortcut', async ({ page }) => {
+    // Prompt 10D: login lands on /dashboard, which has the global header search
     const searchInput = page.locator('#medscope-global-search');
     await expect(searchInput).toBeVisible();
 
@@ -35,26 +41,16 @@ test.describe('MedScope Receptionist Corrections E2E Suite (Prompt 04)', () => {
     await page.goto('/business-day');
     await page.waitForLoadState('networkidle');
 
-    // In Receptionist view, close button must be disabled/restricted
+    // Receptionist: close button must be disabled/restricted
     const receptionistDisabledBtn = page.locator('[data-testid="receptionist-close-day-disabled"]');
     await expect(receptionistDisabledBtn).toBeVisible();
     await expect(receptionistDisabledBtn).toBeDisabled();
 
-    // Toggle role to Admin via header role switcher
-    const roleSwitcher = page.locator('[data-testid="role-toggle-btn"]');
-    if (await roleSwitcher.isVisible()) {
-      await roleSwitcher.click();
-      await page.waitForTimeout(500);
-
-      // In Admin view, close day button must be visible & enabled
-      const adminCloseBtn = page.locator('[data-testid="admin-close-day-btn"]');
-      await expect(adminCloseBtn).toBeVisible();
-      await expect(adminCloseBtn).toBeEnabled();
-
-      // Switch back to Receptionist
-      await roleSwitcher.click();
-      await page.waitForTimeout(500);
-    }
+    // Admin: sign in as the Admin account (no role switching exists any more)
+    await openAs(page, 'ADMIN', '/business-day');
+    const adminCloseBtn = page.locator('[data-testid="admin-close-day-btn"]');
+    await expect(adminCloseBtn).toBeVisible();
+    await expect(adminCloseBtn).toBeEnabled();
   });
 
   // -------------------------------------------------------------------------
@@ -73,6 +69,11 @@ test.describe('MedScope Receptionist Corrections E2E Suite (Prompt 04)', () => {
     await page.locator('[data-testid="patient-form-phone"]').fill(`017${(timestamp % 10000000).toString().padStart(8, '0')}`);
     await page.locator('[data-testid="save-patient-submit-btn"]').click();
     await expect(page.locator('[data-testid="selected-patient-name"]')).toContainText(`E2E Test Patient ${timestamp}`);
+
+    // Prompt 10E Part 3: age and gender for the visit (Finalize requires both; no silent default)
+    await page.locator('[data-testid="visit-age-input"]').fill('34');
+    await page.locator('[data-testid="visit-age-unit"]').selectOption('years');
+    await page.locator('[data-testid="visit-gender-select"]').selectOption('Male');
 
     // 2. Add Prescribing Doctor with write-only commission
     await page.locator('[data-testid="add-doctor-btn"]').click();
@@ -135,6 +136,13 @@ test.describe('MedScope Receptionist Corrections E2E Suite (Prompt 04)', () => {
     expect(Number(fullVal)).toBeGreaterThan(0);
 
     // Reset to Zero
+    // Prompt 10E Part 4: the channel list is exactly the backend values; OTHER asks for a name
+    const methodSelect = page.locator('[data-testid="payment-method-select"]');
+    await expect(methodSelect.locator('option')).toHaveText(['Cash', 'bKash', 'Nagad', 'Rocket', 'Card', 'Bank Transfer', 'Other (type the name)']);
+    await methodSelect.selectOption('OTHER');
+    await expect(page.locator('[data-testid="channel-detail-input"]')).toBeVisible();
+    await methodSelect.selectOption('CASH');
+
     await page.locator('[data-testid="zero-pay-btn"]').click();
     await expect(paidInput).toHaveValue('0');
 
@@ -146,7 +154,7 @@ test.describe('MedScope Receptionist Corrections E2E Suite (Prompt 04)', () => {
     await expect(dualModal).toBeVisible();
     await expect(page.locator('text=Patient Copy')).toBeVisible();
     await expect(page.locator('text=Office / Lab Copy')).toBeVisible();
-    await expect(page.locator('text=Unsaved Draft')).toBeVisible();
+    await expect(page.locator('[data-testid="invoice-draft-tag"]')).toContainText('Unsaved Draft');
 
     // Back & Correct preserves all inputs
     await page.locator('[data-testid="invoice-preview-back-btn"]').click();
@@ -154,12 +162,14 @@ test.describe('MedScope Receptionist Corrections E2E Suite (Prompt 04)', () => {
     await expect(page.locator('[data-testid="selected-patient-name"]')).toContainText(`E2E Test Patient ${timestamp}`);
     await expect(page.locator('[data-testid^="selected-line-"]')).toHaveCount(1);
 
-    // Re-open preview and save
+    // Prompt 10D: Save Draft first (no invoice number, no operational effect) ...
     await page.locator('[data-testid="generate-preview-btn"]').click();
     await expect(dualModal).toBeVisible();
-    await page.locator('[data-testid="invoice-preview-save-btn"]').click();
+    await page.locator('[data-testid="invoice-preview-save-draft-btn"]').click();
+    await expect(page.locator('[data-testid="invoice-draft-tag"]')).toContainText('Saved Draft DRAFT-', { timeout: 8000 });
 
-    // Save succeeds and transitions to saved invoice
+    // ... then Finalize, which assigns the real invoice number
+    await page.locator('[data-testid="invoice-preview-finalize-btn"]').click();
     await expect(page.locator('text=Diagnostic Bill #')).toBeVisible({ timeout: 8000 });
     await page.locator('[data-testid="invoice-preview-close-btn"]').click();
 
@@ -184,7 +194,7 @@ test.describe('MedScope Receptionist Corrections E2E Suite (Prompt 04)', () => {
     const statusBadges = page.locator('table tbody td:nth-child(8) span');
     if ((await statusBadges.count()) > 0) {
       const firstStatus = await statusBadges.first().textContent();
-      expect(['Unpaid', 'Partial Due', 'Paid']).toContain(firstStatus?.trim());
+      expect(['Unpaid', 'Partial Due', 'Paid', 'Draft']).toContain(firstStatus?.trim());
     }
 
     // Verify User-Friendly Status Filter Dropdown with All 6 Events

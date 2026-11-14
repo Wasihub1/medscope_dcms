@@ -2,7 +2,8 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from backend.app.core.database import get_db
-from backend.app.core.security import CurrentActor, require_receptionist
+from backend.app.core.security import CurrentActor
+from backend.app.core.permissions import require_permission
 from backend.app.models.patient import Patient
 from backend.app.schemas.patient import (
     PatientCreate,
@@ -24,7 +25,7 @@ router = APIRouter()
 def list_patients(
     q: Optional[str] = Query(default="", description="Search by name, phone, code"),
     limit: int = Query(default=30, le=100),
-    actor: CurrentActor = Depends(require_receptionist),
+    actor: CurrentActor = Depends(require_permission("patient.view")),
     db: Session = Depends(get_db),
 ):
     patients = search_patients(db, actor.tenant_id, q, limit=limit)
@@ -35,7 +36,7 @@ def list_patients(
 def check_duplicates(
     name: str = Query(..., min_length=2),
     phone: str = Query(..., min_length=6),
-    actor: CurrentActor = Depends(require_receptionist),
+    actor: CurrentActor = Depends(require_permission("patient.view")),
     db: Session = Depends(get_db),
 ):
     return check_duplicate_patients(db, actor.tenant_id, name, phone)
@@ -44,7 +45,7 @@ def check_duplicates(
 @router.post("", response_model=PatientResponse, status_code=status.HTTP_201_CREATED, summary="Create a new patient")
 def create_new_patient(
     data: PatientCreate,
-    actor: CurrentActor = Depends(require_receptionist),
+    actor: CurrentActor = Depends(require_permission("patient.create")),
     db: Session = Depends(get_db),
 ):
     patient = create_patient(
@@ -62,7 +63,7 @@ def create_new_patient(
 @router.get("/{patient_id}", response_model=PatientResponse, summary="Get patient details")
 def get_patient(
     patient_id: int,
-    actor: CurrentActor = Depends(require_receptionist),
+    actor: CurrentActor = Depends(require_permission("patient.view")),
     db: Session = Depends(get_db),
 ):
     patient = db.get(Patient, patient_id)
@@ -74,7 +75,7 @@ def get_patient(
 @router.get("/{patient_id}/history", response_model=PatientHistoryResponse, summary="Get permitted patient front-desk operational history")
 def get_history(
     patient_id: int,
-    actor: CurrentActor = Depends(require_receptionist),
+    actor: CurrentActor = Depends(require_permission("patient.view")),
     db: Session = Depends(get_db),
 ):
     history = get_patient_history(db, actor.tenant_id, patient_id)

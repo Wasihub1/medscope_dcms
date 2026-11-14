@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Boolean, DateTime, Integer, Index
+from sqlalchemy import String, Boolean, DateTime, Integer, Index, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.app.core.database import Base
 from backend.app.core.timezone import utc_now
@@ -23,6 +23,10 @@ class Referrer(Base):
     commission_rate: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    # Prompt 11: soft delete (separate from `active`); NULL deleted_at = not deleted
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("staff.id"), nullable=True)
+    delete_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     invoices: Mapped[list["Invoice"]] = relationship("Invoice", foreign_keys="Invoice.referrer_id", back_populates="referrer")
 

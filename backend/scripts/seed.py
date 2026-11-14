@@ -11,6 +11,7 @@ if str(BASE_DIR) not in sys.path:
 from sqlalchemy import select, delete
 from backend.app.core.database import SessionLocal
 from backend.app.core.timezone import utc_now
+from backend.app.core.lab_sections import section_from_text
 from backend.app.models import (
     Tenant,
     Staff,
@@ -32,7 +33,6 @@ from backend.app.models import (
     BusinessDayChannelBalance,
     SequenceCounter,
     AuditLog,
-    ReprintLog,
 )
 
 
@@ -74,6 +74,8 @@ def seed_development_data():
                     display_name=s["display_name"],
                     role=s["role"],
                     department=s["department"],
+                    # Prompt 10E: a LAB_TECH always belongs to a lab room
+                    lab_section=section_from_text(s["department"]) if s["role"] == "LAB_TECH" else None,
                     email=s["email"],
                     phone=s["phone"],
                     address=s["address"],
@@ -82,6 +84,8 @@ def seed_development_data():
                 db.add(st)
             else:
                 st.department = s["department"]
+                if st.role == "LAB_TECH" and not st.lab_section:
+                    st.lab_section = section_from_text(s["department"])
         db.flush()
 
         # 3. Test Destinations
@@ -121,11 +125,11 @@ def seed_development_data():
             {"code": "HBSAG", "name": "HBsAg (Screening / Rapid)", "short_name": "HBsAg", "department": "Serology", "price": 350, "sample_type": "Serum (Plain Tube)", "default_assignee": "Biochemistry Room 102", "turnaround_hours": 4, "performing_role": "LAB_TECH", "requires_doctor": False, "report_template": "NUMERIC_TABLE", "approval_rule": "TECHNICIAN_FINAL"},
             {"code": "HIV", "name": "HIV I & II (Screening)", "short_name": "HIV", "department": "Serology", "price": 500, "sample_type": "Serum (Plain Tube)", "default_assignee": "Biochemistry Room 102", "turnaround_hours": 4, "performing_role": "LAB_TECH", "requires_doctor": False, "report_template": "NUMERIC_TABLE", "approval_rule": "TECHNICIAN_FINAL"},
             {"code": "WIDAL", "name": "Widal Test (Typhoid)", "short_name": "Widal", "department": "Serology", "price": 350, "sample_type": "Serum (Plain Tube)", "default_assignee": "Biochemistry Room 102", "turnaround_hours": 4, "performing_role": "LAB_TECH", "requires_doctor": False, "report_template": "NUMERIC_TABLE", "approval_rule": "TECHNICIAN_FINAL"},
-            {"code": "USG_W_A", "name": "USG of Whole Abdomen", "short_name": "USG Whole Abdomen", "department": "Ultrasonogram", "price": 1200, "sample_type": "None", "default_assignee": "Ultrasonography Room 204", "turnaround_hours": 2, "performing_role": "DOCTOR", "requires_doctor": True, "report_template": "NARRATIVE", "approval_rule": "DOCTOR_REQUIRED"},
-            {"code": "USG_L_A", "name": "USG of Lower Abdomen", "short_name": "USG Lower Abdomen", "department": "Ultrasonogram", "price": 800, "sample_type": "None", "default_assignee": "Ultrasonography Room 204", "turnaround_hours": 2, "performing_role": "DOCTOR", "requires_doctor": True, "report_template": "NARRATIVE", "approval_rule": "DOCTOR_REQUIRED"},
-            {"code": "USG_PREG", "name": "USG of Pregnancy Profile", "short_name": "USG Pregnancy", "department": "Ultrasonogram", "price": 1000, "sample_type": "None", "default_assignee": "Ultrasonography Room 204", "turnaround_hours": 2, "performing_role": "DOCTOR", "requires_doctor": True, "report_template": "NARRATIVE", "approval_rule": "DOCTOR_REQUIRED"},
+            {"code": "USG_W_A", "name": "USG of Whole Abdomen", "short_name": "USG Whole Abdomen", "department": "Ultrasonogram", "price": 1200, "sample_type": None, "default_assignee": "Ultrasonography Room 204", "turnaround_hours": 2, "performing_role": "DOCTOR", "requires_doctor": True, "report_template": "NARRATIVE", "approval_rule": "DOCTOR_REQUIRED"},
+            {"code": "USG_L_A", "name": "USG of Lower Abdomen", "short_name": "USG Lower Abdomen", "department": "Ultrasonogram", "price": 800, "sample_type": None, "default_assignee": "Ultrasonography Room 204", "turnaround_hours": 2, "performing_role": "DOCTOR", "requires_doctor": True, "report_template": "NARRATIVE", "approval_rule": "DOCTOR_REQUIRED"},
+            {"code": "USG_PREG", "name": "USG of Pregnancy Profile", "short_name": "USG Pregnancy", "department": "Ultrasonogram", "price": 1000, "sample_type": None, "default_assignee": "Ultrasonography Room 204", "turnaround_hours": 2, "performing_role": "DOCTOR", "requires_doctor": True, "report_template": "NARRATIVE", "approval_rule": "DOCTOR_REQUIRED"},
             {"code": "URINE_C_S", "name": "Urine Culture and Sensitivity (C/S)", "short_name": "Urine C/S", "department": "Microbiology", "price": 800, "sample_type": "Sterile Midstream Urine", "default_assignee": "Microbiology Lab 105", "turnaround_hours": 48, "performing_role": "LAB_TECH", "requires_doctor": False, "report_template": "CULTURE_SENSITIVITY", "approval_rule": "BOTH_SIGNATURES"},
-            {"code": "XRAY_CHEST", "name": "X-Ray Chest P/A View", "short_name": "CXR P/A", "department": "Radiology & Imaging", "price": 500, "sample_type": "None", "default_assignee": None, "turnaround_hours": 4, "performing_role": "DOCTOR", "requires_doctor": True, "report_template": "NARRATIVE", "approval_rule": "DOCTOR_REQUIRED"},
+            {"code": "XRAY_CHEST", "name": "X-Ray Chest P/A View", "short_name": "CXR P/A", "department": "Radiology & Imaging", "price": 500, "sample_type": None, "default_assignee": None, "turnaround_hours": 4, "performing_role": "DOCTOR", "requires_doctor": True, "report_template": "NARRATIVE", "approval_rule": "DOCTOR_REQUIRED"},
         ]
         test_map = {}
         for t in tests_data:

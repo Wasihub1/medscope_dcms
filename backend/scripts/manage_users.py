@@ -136,6 +136,9 @@ def cmd_lock(args):
 
 
 def cmd_assign_role(args):
+    """Prompt 10D: one login = one fixed role. Sets (replaces) the user's single role.
+    Prefer the Owner/Admin 'Create User' tab, which also enforces the last-admin rule."""
+    from backend.app.core.permissions import ROLES
     db = SessionLocal()
     try:
         staff = db.execute(
@@ -146,56 +149,60 @@ def cmd_assign_role(args):
             sys.exit(1)
 
         role = args.role.strip().upper()
-        existing = db.execute(
-            select(StaffRole).where(StaffRole.staff_id == staff.id, StaffRole.role == role)
-        ).scalar_one_or_none()
-        if existing:
-            print(f"User '{staff.username}' already holds role '{role}'.")
+        if role not in ROLES:
+            print(f"Error: Unknown role '{role}'. Valid roles: {', '.join(ROLES)}.")
+            sys.exit(1)
+        rows = db.execute(select(StaffRole).where(StaffRole.staff_id == staff.id)).scalars().all()
+        if rows and rows[0].role == role:
+            print(f"User '{staff.username}' already has role '{role}'.")
             return
-
-        new_role = StaffRole(
-            staff_id=staff.id,
-            role=role,
-            is_primary=bool(args.primary),
-            created_at=utc_now(),
+        if rows:
+            rows[0].role = role
+            rows[0].is_primary = True
+        else:
+            db.add(StaffRole(staff_id=staff.id, role=role, is_primary=True, created_at=utc_now()))
+        lab_section = (getattr(args, "lab_section", None) or "").strip().upper() or None
+        if role == "LAB_TECH":
+            # Prompt 10E: a technician must belong to a lab room
+            from backend.app.core.lab_sections import LAB_SECTIONS
+            lab_section = lab_section or staff.lab_section
+            if lab_section not in LAB_SECTIONS:
+                print(f"Error: LAB_TECH needs --lab-section, one of: {', '.join(LAB_SECTIONS)}.")
+                sys.exit(1)
+        old_role = staff.role
+        old_section = staff.lab_section
+        old_counts = bool(staff.role == "LAB_TECH" and staff.active and staff.lab_section)
+        staff.role = role
+        staff.lab_section = lab_section if role == "LAB_TECH" else None
+        db.flush()
+        # Prompt 10F (A11): the same room routine as the Create User tab, in the same transaction:
+        # the room the user left is checked for emptiness, the room they joined releases its orders.
+        from backend.app.services.audit_service import log_audit_event
+        from backend.app.services.routing_service import apply_technician_room_change
+        log_audit_event(
+            db=db, tenant_id=staff.tenant_id, action="USER_ROLE_CHANGED", entity_type="STAFF",
+            entity_id=staff.id, acting_role="SYSTEM_CLI", actor_id=None,
+            before_value=f"{old_role} (lab_section={old_section})",
+            after_value=f"{role} (lab_section={staff.lab_section}) via manage_users.py",
         )
-        db.add(new_role)
+        demoted, released = apply_technician_room_change(
+            db, staff.tenant_id, old_section, old_counts, staff.lab_section,
+            bool(staff.role == "LAB_TECH" and staff.active and staff.lab_section),
+            None, "SYSTEM_CLI", f"{staff.username}, role set by CLI",
+        )
         db.commit()
-        print(f"Success: Assigned role '{role}' to '{staff.username}'.")
+        print(f"Success: '{staff.username}' now has the single role '{role}'.")
+        if demoted or released:
+            print(f"Room routing: {demoted} order(s) set UNASSIGNED, {released} order(s) released.")
     finally:
         db.close()
 
 
 def cmd_remove_role(args):
-    db = SessionLocal()
-    try:
-        staff = db.execute(
-            select(Staff).where(func.lower(Staff.username) == args.username.strip().lower())
-        ).scalar_one_or_none()
-        if not staff:
-            print(f"Error: User '{args.username}' not found.")
-            sys.exit(1)
-
-        role = args.role.strip().upper()
-        existing = db.execute(
-            select(StaffRole).where(StaffRole.staff_id == staff.id, StaffRole.role == role)
-        ).scalar_one_or_none()
-        if not existing:
-            print(f"User '{staff.username}' does not hold role '{role}'.")
-            return
-
-        roles_count = db.execute(
-            select(func.count(StaffRole.id)).where(StaffRole.staff_id == staff.id)
-        ).scalar() or 0
-        if roles_count <= 1:
-            print(f"Error: Cannot remove role. User must hold at least one role.")
-            sys.exit(1)
-
-        db.delete(existing)
-        db.commit()
-        print(f"Success: Removed role '{role}' from '{staff.username}'.")
-    finally:
-        db.close()
+    """Prompt 10D: every user holds exactly one role, so a role cannot be removed.
+    Use 'assign-role' to change it, or deactivate the user in the Create User tab."""
+    print("Error: Each user has exactly one role (Prompt 10D). Use 'assign-role' to change it.")
+    sys.exit(1)
 
 
 def cmd_create_user(args):
@@ -220,6 +227,18 @@ def cmd_create_user(args):
         roles = [r.strip().upper() for r in args.roles.split(",") if r.strip()]
         if not roles:
             roles = ["RECEPTIONIST"]
+        if len(roles) != 1:
+            print("Error: One login = one fixed role (Prompt 10D). Give exactly one role in --roles.")
+            sys.exit(1)
+        from backend.app.core.permissions import ROLES
+        from backend.app.core.lab_sections import LAB_SECTIONS
+        if roles[0] not in ROLES:
+            print(f"Error: Unknown role '{roles[0]}'. Valid roles: {', '.join(ROLES)}.")
+            sys.exit(1)
+        lab_section = (getattr(args, "lab_section", None) or "").strip().upper() or None
+        if roles[0] == "LAB_TECH" and lab_section not in LAB_SECTIONS:
+            print(f"Error: LAB_TECH needs --lab-section, one of: {', '.join(LAB_SECTIONS)} (Prompt 10E).")
+            sys.exit(1)
 
         staff = Staff(
             tenant_id=args.tenant_id,
@@ -227,6 +246,7 @@ def cmd_create_user(args):
             display_name=args.display_name.strip(),
             role=roles[0],
             department=args.department,
+            lab_section=lab_section if roles[0] == "LAB_TECH" else None,
             email=args.email,
             phone=args.phone,
             active=True,
@@ -257,7 +277,7 @@ def cmd_init_staff_passwords(args):
     """
     db = SessionLocal()
     try:
-        staff_usernames = ["reception_fatima", "admin_tariq", "tech_kamal", "tech_nasrin"]
+        staff_usernames = ["reception_fatima", "cashier_fatima", "admin_tariq", "owner_tariq", "tech_kamal", "tech_nasrin", "tech_micro", "tech_usg"]
         for uname in staff_usernames:
             staff = db.execute(
                 select(Staff).where(func.lower(Staff.username) == uname)
@@ -310,14 +330,15 @@ def main():
     p_lock.set_defaults(func=cmd_lock)
 
     # assign-role
-    p_ar = subparsers.add_parser("assign-role", help="Assign an additional role to a user")
+    p_ar = subparsers.add_parser("assign-role", help="Set the user's single role (one login = one role)")
     p_ar.add_argument("--username", required=True, help="Staff username")
-    p_ar.add_argument("--role", required=True, help="Role name (e.g. ADMIN, RECEPTIONIST, LAB_TECH, OWNER, CASHIER)")
-    p_ar.add_argument("--primary", action="store_true", help="Set as primary role")
+    p_ar.add_argument("--role", required=True, help="Role name (OWNER, ADMIN, RECEPTIONIST, CASHIER, LAB_TECH, DOCTOR)")
+    p_ar.add_argument("--lab-section", dest="lab_section", help="Lab room for LAB_TECH (HEMATOLOGY, BIOCHEMISTRY, MICROBIOLOGY, ULTRASONOGRAPHY)")
+    p_ar.add_argument("--primary", action="store_true", help="Ignored (kept for compatibility; every user has one role)")
     p_ar.set_defaults(func=cmd_assign_role)
 
     # remove-role
-    p_rr = subparsers.add_parser("remove-role", help="Remove a role from a user")
+    p_rr = subparsers.add_parser("remove-role", help="Disabled: every user has exactly one role")
     p_rr.add_argument("--username", required=True, help="Staff username")
     p_rr.add_argument("--role", required=True, help="Role name to remove")
     p_rr.set_defaults(func=cmd_remove_role)
@@ -326,7 +347,8 @@ def main():
     p_cu = subparsers.add_parser("create-user", help="Create a new staff user")
     p_cu.add_argument("--username", required=True, help="Unique username")
     p_cu.add_argument("--display-name", required=True, help="Full display name")
-    p_cu.add_argument("--roles", default="RECEPTIONIST", help="Comma-separated roles")
+    p_cu.add_argument("--roles", default="RECEPTIONIST", help="Exactly one role: OWNER, ADMIN, RECEPTIONIST, CASHIER, LAB_TECH or DOCTOR")
+    p_cu.add_argument("--lab-section", dest="lab_section", help="Lab room, required for LAB_TECH (HEMATOLOGY, BIOCHEMISTRY, MICROBIOLOGY, ULTRASONOGRAPHY)")
     p_cu.add_argument("--tenant-id", default="center-seba-01", help="Tenant ID")
     p_cu.add_argument("--department", help="Department (e.g. Front Desk, Hematology)")
     p_cu.add_argument("--email", help="Email address")

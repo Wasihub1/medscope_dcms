@@ -52,6 +52,9 @@ class PatientResponse(BaseSchema):
     address: str
     gender: str
     created_at: datetime
+    # Prompt 10E Part 3: age from the latest visit snapshot (for New Invoice prefill)
+    last_age_value: Optional[int] = None
+    last_age_unit: Optional[str] = None
     full_name: Optional[str] = None
     mrn: Optional[str] = None
 

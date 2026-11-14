@@ -31,9 +31,13 @@ class Result(Base):
     entered_by_id: Mapped[int] = mapped_column(Integer, ForeignKey("staff.id"), nullable=False)
     entered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+    # Prompt 16: who saved last (the technician sign-off when status is ENTERED; used by the
+    # "changed by someone else" check). entered_by_id stays the first saver. NULL on older rows.
+    updated_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("staff.id"), nullable=True)
 
     test_order: Mapped["TestOrder"] = relationship("TestOrder", back_populates="result")
     entered_by: Mapped["Staff"] = relationship("Staff", foreign_keys=[entered_by_id])
+    updated_by: Mapped["Staff | None"] = relationship("Staff", foreign_keys=[updated_by_id])
     items: Mapped[list["ResultItem"]] = relationship("ResultItem", back_populates="result", cascade="all, delete-orphan", order_by="ResultItem.sort_order")
 
     __table_args__ = (
@@ -70,6 +74,12 @@ class ResultItem(Base):
     critical_max: Mapped[float | None] = mapped_column(Float, nullable=True)
     impossible_min: Mapped[float | None] = mapped_column(Float, nullable=True)
     impossible_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Prompt 14 (D24): which band version was used, and how it matched: MATCHED (sex + age band),
+    # FALLBACK_ANY (the 'any sex' band for that age), NO_BAND (no band fits: flag left empty, needs review).
+    # NULL on results saved before Prompt 14.
+    reference_range_version_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("reference_range_versions.id"), nullable=True)
+    range_match: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     flag: Mapped[str | None] = mapped_column(String(50), nullable=True)  # NORMAL, LOW, HIGH, CRITICAL, None
     comment: Mapped[str | None] = mapped_column(String(300), nullable=True)

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
@@ -12,7 +13,46 @@ from backend.app.schemas.business_day import (
 from backend.app.services.audit_service import log_audit_event
 
 
-STANDARD_CHANNELS = ["CASH", "BKASH", "NAGAD", "BANK_TRANSFER", "POS_CARD"]
+from backend.app.core.payment_channels import PAYMENT_CHANNELS, normalize_channel
+
+# Prompt 10E Part 4: all backend channels (CASH, BKASH, NAGAD, ROCKET, POS_CARD, BANK_TRANSFER, OTHER)
+STANDARD_CHANNELS = list(PAYMENT_CHANNELS)
+
+
+def get_or_create_channel_balance(db: Session, tenant_id: str, day: BusinessDay, channel: str) -> BusinessDayChannelBalance:
+    """Returns the day's balance row for a channel, creating a zero row when it is missing
+    (business days opened before a channel existed, e.g. ROCKET / OTHER)."""
+    ch = normalize_channel(channel)
+    row = db.execute(
+        select(BusinessDayChannelBalance).where(
+            BusinessDayChannelBalance.business_day_id == day.id,
+            BusinessDayChannelBalance.channel == ch,
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = BusinessDayChannelBalance(
+            tenant_id=tenant_id, business_day_id=day.id, channel=ch, opening_balance=0, received_amount=0
+        )
+        db.add(row)
+        db.flush()
+    return row
+
+
+def add_to_channel_balance(db: Session, tenant_id: str, day: BusinessDay, channel: str, amount: int) -> None:
+    """Adds (or, with a negative amount, removes) money received on a channel for the day."""
+    row = get_or_create_channel_balance(db, tenant_id, day, channel)
+    row.received_amount = max(0, row.received_amount + int(amount))
+
+
+def get_business_day_state(db: Session, tenant_id: str):
+    """Prompt 13B: non-financial open/closed state from the same query as get_business_day_status."""
+    from backend.app.schemas.business_day import BusinessDayState
+    day = db.execute(
+        select(BusinessDay).where(BusinessDay.tenant_id == tenant_id, BusinessDay.status == "OPEN")
+    ).scalars().first()
+    if not day:
+        return BusinessDayState(is_open=False)
+    return BusinessDayState(is_open=True, day_number=day.day_number, business_date=day.opened_at.strftime("%Y-%m-%d"))
 
 
 def get_business_day_status(
@@ -58,6 +98,13 @@ def get_business_day_status(
         )
         for cb in active_day.channel_balances
     ]
+    # Prompt 10E: show every channel, even when the day was opened before it existed
+    present = {cb.channel for cb in active_day.channel_balances}
+    channel_list += [
+        BusinessDayChannelBalanceResponse(channel=ch, opening_balance=0, received_amount=0)
+        for ch in STANDARD_CHANNELS
+        if ch not in present
+    ]
 
     return BusinessDayStatusResponse(
         is_open=True,
@@ -86,16 +133,18 @@ def open_business_day(
         db.execute(
             select(BusinessDay).where(
                 BusinessDay.tenant_id == tenant_id,
-                BusinessDay.status == "OPEN",
+                BusinessDay.status.in_(["OPEN", "REOPENED"]),
             )
         )
         .scalars()
         .first()
     )
     if existing:
+        # Prompt 18B: only one day may be OPEN or REOPENED; a reopened day must be closed again first
+        state = "already OPEN" if existing.status == "OPEN" else "REOPENED and must be closed again first"
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Business Day #{existing.day_number} is already OPEN. Only one session may be open at a time.",
+            detail=f"Business Day #{existing.day_number} is {state}. Only one session may be open at a time.",
         )
 
     # Count previous days to assign next day_number
@@ -140,63 +189,3 @@ def open_business_day(
         after_value=f"Opened Session #{b_day.day_number}, Opening Cash Float: Tk {b_day.opening_float}",
     )
     return b_day
-
-
-def reject_close_business_day_for_receptionist(
-    acting_role: str,
-):
-    """Enforces Section 2.11 & 2.11-13: Receptionist and Cashier CANNOT close business day."""
-    role_norm = acting_role.strip().upper() if acting_role else ""
-    if role_norm not in ("ADMIN", "OWNER"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission Denied. Receptionists and Cashiers are strictly forbidden from closing, adjusting, or reconciling a Business Day. Closing requires Admin or Owner credentials.",
-        )
-
-
-def close_business_day(
-    db: Session,
-    tenant_id: str,
-    closer_id: int,
-    acting_role: str = "ADMIN",
-    notes: Optional[str] = None,
-) -> BusinessDay:
-    """Closes the current active business day session. Strictly restricted to Admin/Owner."""
-    reject_close_business_day_for_receptionist(acting_role)
-
-    b_day = (
-        db.execute(
-            select(BusinessDay).where(
-                BusinessDay.tenant_id == tenant_id,
-                BusinessDay.status == "OPEN",
-            )
-        )
-        .scalars()
-        .first()
-    )
-    if not b_day:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No active Business Day session is currently open to close.",
-        )
-
-    b_day.status = "CLOSED"
-    b_day.closed_at = datetime.utcnow()
-    b_day.closed_by_id = closer_id
-    if notes and notes.strip():
-        b_day.notes = f"{b_day.notes or ''} [Closed: {notes.strip()}]".strip()
-
-    db.flush()
-
-    log_audit_event(
-        db=db,
-        tenant_id=tenant_id,
-        action="CLOSE_BUSINESS_DAY",
-        entity_type="BUSINESS_DAY",
-        entity_id=b_day.id,
-        acting_role=acting_role,
-        actor_id=closer_id,
-        after_value=f"Closed Business Day #{b_day.day_number} (Status: CLOSED)",
-    )
-    return b_day
-

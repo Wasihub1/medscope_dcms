@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.core.timezone import utc_now
-from backend.app.models.user import Staff, StaffRole, AuthSession
+from backend.app.models.user import Staff, StaffRole, AuthSession, StaffPermissionOverride
+from backend.app.core.permissions import effective_permissions
 from backend.app.services.audit_service import log_audit_event
 
 # Argon2id password hasher instance
@@ -71,25 +72,24 @@ def validate_password_strength(password: str, username: str) -> None:
 
 
 def get_home_route_for_role(role: str) -> str:
-    """Determines default landing route per staff role."""
-    r = (role or "").upper()
-    if r in ("RECEPTIONIST", "CASHIER"):
-        return "/invoices"
-    elif r == "LAB_TECH":
-        return "/worklist"
-    elif r in ("ADMIN", "OWNER"):
-        return "/"
-    return "/invoices"
+    """Prompt 10D (ADL-033): every login lands on the Dashboard, whatever the role."""
+    return "/dashboard"
 
 
 def get_staff_roles(db: Session, staff_id: int, fallback_role: str) -> List[str]:
-    """Retrieves list of active roles for a staff member."""
-    roles = db.execute(
-        select(StaffRole.role).where(StaffRole.staff_id == staff_id).order_by(StaffRole.is_primary.desc())
-    ).scalars().all()
-    if not roles:
-        return [fallback_role]
-    return list(roles)
+    """Prompt 10D (ADL-032): one login = one fixed role. Returns a single-item list."""
+    role = db.execute(select(StaffRole.role).where(StaffRole.staff_id == staff_id)).scalars().first()
+    return [role or fallback_role]
+
+
+def load_effective_permissions(db: Session, staff: Staff):
+    """Role defaults then per-user overrides (backend/app/core/permissions.py)."""
+    rows = db.execute(
+        select(StaffPermissionOverride.permission_key, StaffPermissionOverride.granted).where(
+            StaffPermissionOverride.staff_id == staff.id
+        )
+    ).all()
+    return effective_permissions(staff.role, {k: g for k, g in rows})
 
 
 def authenticate_user(
@@ -112,7 +112,7 @@ def authenticate_user(
     ).scalar_one_or_none()
 
     # Generic error for nonexistent or inactive user
-    if not staff or not staff.active:
+    if not staff or not staff.active or staff.deleted_at is not None:
         _record_failed_attempt(rate_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -175,19 +175,13 @@ def create_session(
     """
     Creates an active server-side session and returns (session_record, raw_session_token).
     """
-    available_roles = get_staff_roles(db, staff.id, staff.role)
-
-    if requested_role:
-        norm_req = requested_role.strip().upper()
-        if norm_req not in available_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"User does not hold the requested role '{requested_role}'.",
-            )
-        acting_role = norm_req
-    else:
-        # Default to primary or first available role
-        acting_role = available_roles[0]
+    # Prompt 10D: one login = one fixed role. The session always carries the user's role.
+    acting_role = staff.role
+    if requested_role and requested_role.strip().upper() != acting_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"User does not hold the requested role '{requested_role}'.",
+        )
 
     raw_token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
@@ -268,7 +262,7 @@ def resolve_session(db: Session, raw_token: str) -> Tuple[AuthSession, Staff]:
         )
 
     staff = db.get(Staff, session.staff_id)
-    if not staff or not staff.active:
+    if not staff or not staff.active or staff.deleted_at is not None:
         session.revoked_at = now
         db.commit()
         raise HTTPException(
@@ -304,42 +298,17 @@ def revoke_session(db: Session, session: AuthSession, staff: Staff) -> None:
     db.commit()
 
 
-def revoke_all_user_sessions(db: Session, staff_id: int) -> None:
-    """Revokes all active sessions for a staff member (used on password change/reset)."""
+def revoke_all_user_sessions(db: Session, staff_id: int, commit: bool = True) -> None:
+    """Revokes all active sessions for a staff member (used on password change/reset).
+    Prompt 10F: callers that write the user change, its audit row and dependent rows (user
+    management) pass commit=False so everything commits once, in one transaction."""
     db.execute(
         update(AuthSession)
         .where(AuthSession.staff_id == staff_id, AuthSession.revoked_at.is_(None))
         .values(revoked_at=utc_now())
     )
-    db.commit()
-
-
-def switch_acting_role(db: Session, session: AuthSession, staff: Staff, new_role: str) -> AuthSession:
-    """Switches the acting role for the active session among roles held by the user."""
-    available_roles = get_staff_roles(db, staff.id, staff.role)
-    norm_role = new_role.strip().upper()
-    if norm_role not in available_roles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User does not hold the '{new_role}' role.",
-        )
-
-    old_role = session.acting_role
-    session.acting_role = norm_role
-    log_audit_event(
-        db=db,
-        tenant_id=staff.tenant_id,
-        action="AUTH_ACTING_ROLE_CHANGED",
-        entity_type="STAFF",
-        entity_id=staff.id,
-        acting_role=norm_role,
-        actor_id=staff.id,
-        before_value=old_role,
-        after_value=norm_role,
-    )
-    db.commit()
-    db.refresh(session)
-    return session
+    if commit:
+        db.commit()
 
 
 def change_user_password(

@@ -11,18 +11,68 @@ class RefundEligibilityResponse(BaseModel):
     is_eligible: bool
     rejection_reason: Optional[str] = None
     refundable_amount: int
+    reason_code: Optional[str] = None  # ALREADY_CANCELLED, REQUEST_PENDING, SAMPLE_ALREADY_TAKEN
 
 
 class RefundRequestCreate(BaseModel):
     invoice_line_id: Optional[int] = None
     invoice_id: Optional[int] = None
+    # Prompt 13: `amount` and `request_type` are accepted only so old clients do not break; both are
+    # ignored (the server computes the amount and the type is always PRE_SAMPLE_CANCELLATION).
     amount: Optional[int] = None
-    reason: str = Field(..., min_length=2, max_length=500, description="Reason for cancellation / D15 refund")
-    request_type: Optional[str] = Field(default="PRE_SAMPLE_CANCELLATION", description="PRE_SAMPLE_CANCELLATION or D15_NOT_PERFORMED")
+    reason: Optional[str] = Field(default=None, max_length=500, description="Optional at request, mandatory at approval")
+    request_type: Optional[str] = Field(default=None, description="Ignored")
+    # Prompt 13B: cancelling never pays money out. Disbursement is its own step (POST /refunds/disburse/{id}).
+
+
+class InvoiceCancellationCreate(BaseModel):
+    """Prompt 13A: cancel every line of one Confirmed invoice together (only when no line is locked)."""
+    invoice_id: int
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+
+class InvoiceCancellationLine(BaseModel):
+    invoice_line_id: int
+    test_name: str
+    line_price: int
+    refund_amount: int
+
+
+class InvoiceCancellationBreakdown(BaseModel):
+    """Read-only whole-invoice numbers (whole taka): sum of compute_cancellation_outcome over the lines."""
+    invoice_id: int
+    can_cancel: bool
+    blocker: Optional[str] = None
+    blocker_message: Optional[str] = None
+    invoice_total: int = 0
+    paid_total: int = 0
+    lines: list[InvoiceCancellationLine] = []
+    total_refund: int = 0
+    retained_amount: int = 0
+    due_after: int = 0
+    net_after: int = 0
+
+
+class CancellationBreakdown(BaseModel):
+    """Read-only numbers for cancelling one line now (whole taka), from compute_cancellation_outcome."""
+    invoice_line_id: int
+    test_name: str
+    invoice_total: int
+    paid_total: int
+    line_price: int
+    retained_amount: int
+    refund_amount: int
+    due_after: int
+    net_after: int
+    can_request: bool
+    blocker: Optional[str] = None
+    # Approval view only: the amount snapshotted when the request was filed (live figures above)
+    snapshot_refund_amount: Optional[int] = None
+    differs_from_snapshot: Optional[bool] = None
 
 
 class RefundDisbursementRequest(BaseModel):
-    method: str = Field(default="CASH", description="CASH, BKASH, NAGAD, POS_CARD, BANK_TRANSFER")
+    method: str = Field(default="CASH", description="One of the channels actually used on the invoice: CASH, BKASH, NAGAD, ROCKET, POS_CARD, BANK_TRANSFER, OTHER")
     reference: Optional[str] = Field(default=None, max_length=100)
     notes: Optional[str] = Field(default=None, max_length=300)
 

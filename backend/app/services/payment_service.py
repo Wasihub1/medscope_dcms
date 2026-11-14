@@ -1,13 +1,19 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+from backend.app.core.timezone import DHAKA_TZ
 from typing import List, Optional
 from fastapi import HTTPException, status
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 from backend.app.models.invoice import Invoice
+from backend.app.models.patient import Patient
+from backend.app.services.dues_service import age_bucket, bucket_clauses, due_age_days
 from backend.app.models.payment import Payment
 from backend.app.models.business_day import BusinessDay, BusinessDayChannelBalance
 from backend.app.schemas.payment import DueInvoiceSummary, DueSettlementRequest
 from backend.app.services.audit_service import log_audit_event
+from backend.app.core.payment_channels import validate_channel
+from backend.app.services.business_day_service import add_to_channel_balance
+from backend.app.services import accounting_service
 
 
 def list_due_invoices(
@@ -15,6 +21,9 @@ def list_due_invoices(
     tenant_id: str,
     query: Optional[str] = None,
     limit: int = 50,
+    bucket: Optional[str] = None,
+    date_from=None,
+    date_to=None,
 ) -> List[DueInvoiceSummary]:
     """Retrieves invoices that have an outstanding due balance (> 0)."""
     stmt = (
@@ -23,7 +32,7 @@ def list_due_invoices(
         .where(
             Invoice.tenant_id == tenant_id,
             Invoice.due > 0,
-            Invoice.status != "CANCELLED",
+            Invoice.status.not_in(["CANCELLED", "DRAFT"]),
         )
         .order_by(desc(Invoice.created_at))
     )
@@ -32,10 +41,19 @@ def list_due_invoices(
         q = query.strip()
         stmt = stmt.where(
             (Invoice.invoice_no.ilike(f"%{q}%"))
-            | (Invoice.patient.has(name=q))
-            | (Invoice.patient.has(phone=q))
+            | (Invoice.temp_invoice_id.ilike(f"%{q}%"))
+            | (Patient.name.ilike(f"%{q}%"))
+            | (Patient.phone.ilike(f"%{q}%"))
+            | (Patient.patient_code.ilike(f"%{q}%"))
         )
 
+    if bucket:
+        stmt = stmt.where(*bucket_clauses(bucket))
+    # Prompt 18: optional bill-date range (Dhaka dates) for the accounting dues report
+    if date_from is not None:
+        stmt = stmt.where(Invoice.created_at >= datetime.combine(date_from, datetime.min.time(), tzinfo=DHAKA_TZ))
+    if date_to is not None:
+        stmt = stmt.where(Invoice.created_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=DHAKA_TZ))
     invoices = list(db.execute(stmt.limit(limit)).scalars().all())
     return [
         DueInvoiceSummary(
@@ -50,6 +68,9 @@ def list_due_invoices(
             paid=inv.paid,
             due=inv.due,
             payment_status=inv.payment_status,
+            age_days=due_age_days(inv),
+            age_bucket=age_bucket(due_age_days(inv)),
+            written_off=inv.written_off or 0,
         )
         for inv in invoices
     ]
@@ -71,6 +92,12 @@ def settle_invoice_due(
             detail="Invoice not found.",
         )
 
+    if invoice.status == "DRAFT":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payments cannot be taken on a DRAFT invoice. Finalize it first.",
+        )
+
     if invoice.due <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -82,6 +109,10 @@ def settle_invoice_due(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Overpayment is forbidden. Entered amount (Tk {data.amount}) exceeds due (Tk {invoice.due}).",
         )
+
+    # Prompt 10E Part 4: backend channel list; OTHER requires the typed channel name
+    method, channel_detail = validate_channel(data.method, data.channel_detail)
+    data.method = method
 
     # Validate digital reference
     if data.method != "CASH":
@@ -103,17 +134,8 @@ def settle_invoice_due(
                 detail=f"Transaction reference '{clean_ref}' has already been used.",
             )
 
-    # Check active Business Day
-    active_day = (
-        db.execute(
-            select(BusinessDay).where(
-                BusinessDay.tenant_id == tenant_id,
-                BusinessDay.status == "OPEN",
-            )
-        )
-        .scalars()
-        .first()
-    )
+    # Prompt 18B: a payment needs an OPEN day (409 closed / reopened, 400 none ever opened)
+    active_day = accounting_service.require_open_day(db, tenant_id)
 
     change_due = 0
     if data.method == "CASH" and data.cash_tendered:
@@ -128,6 +150,7 @@ def settle_invoice_due(
         amount=data.amount,
         method=data.method,
         reference=data.reference.strip() if data.reference else None,
+        channel_detail=channel_detail,
         change_amount=change_due,
         received_by_id=collector_id,
     )
@@ -141,16 +164,10 @@ def settle_invoice_due(
 
     # Update active Day channel balance
     if active_day:
-        channel_rec = db.execute(
-            select(BusinessDayChannelBalance).where(
-                BusinessDayChannelBalance.business_day_id == active_day.id,
-                BusinessDayChannelBalance.channel == data.method,
-            )
-        ).scalar_one_or_none()
-        if channel_rec:
-            channel_rec.received_amount += data.amount
+        add_to_channel_balance(db, tenant_id, active_day, data.method, data.amount)
 
     db.flush()
+    accounting_service.post_payment_received(db, tenant_id, invoice, pmt, collector_id)  # Prompt 18
 
     log_audit_event(
         db=db,
@@ -161,7 +178,7 @@ def settle_invoice_due(
         acting_role=acting_role,
         actor_id=collector_id,
         before_value=f"Due: Tk {before_due}",
-        after_value=f"Paid: Tk {data.amount}, Remaining Due: Tk {invoice.due}, Method: {data.method}",
+        after_value=f"Paid: Tk {data.amount}, Remaining Due: Tk {invoice.due}, Method: {data.method}" + (f" ({channel_detail})" if channel_detail else ""),
     )
     return pmt
 

@@ -22,11 +22,19 @@ class BusinessDay(Base):
     closing_cash_counted: Mapped[int | None] = mapped_column(Integer, nullable=True)
     closing_variance: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    status: Mapped[str] = mapped_column(String(20), default="OPEN", nullable=False, index=True) # OPEN, CLOSED
+    # Prompt 18 (Module 22): expected cash at close (D45), the reason for a variance above the tolerance, and the last reopen
+    closing_expected_cash: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    variance_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    reopened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reopened_by_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("staff.id"), nullable=True)
+    reopen_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+    status: Mapped[str] = mapped_column(String(20), default="OPEN", nullable=False, index=True) # OPEN, CLOSED, REOPENED
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     opened_by: Mapped["Staff"] = relationship("Staff", foreign_keys=[opened_by_id])
     closed_by: Mapped["Staff | None"] = relationship("Staff", foreign_keys=[closed_by_id])
+    reopened_by: Mapped["Staff | None"] = relationship("Staff", foreign_keys=[reopened_by_id])
     channel_balances: Mapped[list["BusinessDayChannelBalance"]] = relationship(
         "BusinessDayChannelBalance", back_populates="business_day", cascade="all, delete-orphan"
     )
@@ -43,7 +51,7 @@ class BusinessDayChannelBalance(Base):
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     business_day_id: Mapped[int] = mapped_column(Integer, ForeignKey("business_days.id"), nullable=False, index=True)
 
-    channel: Mapped[str] = mapped_column(String(50), nullable=False) # CASH, BKASH, NAGAD, BANK_TRANSFER, POS_CARD
+    channel: Mapped[str] = mapped_column(String(50), nullable=False) # CASH, BKASH, NAGAD, ROCKET, POS_CARD, BANK_TRANSFER, OTHER
     opening_balance: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     received_amount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     closing_counted: Mapped[int | None] = mapped_column(Integer, nullable=True)

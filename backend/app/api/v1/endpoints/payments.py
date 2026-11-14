@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 from backend.app.core.database import get_db
-from backend.app.core.security import CurrentActor, require_receptionist
+from backend.app.core.security import CurrentActor
+from backend.app.core.permissions import require_permission
 from backend.app.models.payment import Payment
 from backend.app.schemas.payment import (
     PaymentCreate,
@@ -29,7 +30,7 @@ class GenericPaymentRequest(PaymentCreate):
 @router.post("/payments/", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED, summary="Create a payment / settle due (alias)")
 def create_payment(
     data: GenericPaymentRequest,
-    actor: CurrentActor = Depends(require_receptionist),
+    actor: CurrentActor = Depends(require_permission("payment.take")),
     db: Session = Depends(get_db),
 ):
     method = data.channel or data.method or "CASH"
@@ -38,6 +39,7 @@ def create_payment(
         amount=data.amount,
         method=method,
         reference=ref,
+        channel_detail=data.channel_detail,
         cash_tendered=data.cash_tendered,
     )
     pmt = settle_invoice_due(
@@ -56,6 +58,7 @@ def create_payment(
         amount=pmt.amount,
         method=pmt.method,
         reference=pmt.reference,
+        channel_detail=pmt.channel_detail,
         change_amount=pmt.change_amount,
         received_at=pmt.received_at,
         received_by_id=pmt.received_by_id,
@@ -67,17 +70,18 @@ def create_payment(
 def get_dues(
     q: Optional[str] = Query(default=None, description="Search by invoice no, patient name, phone"),
     limit: int = Query(default=50, le=100),
-    actor: CurrentActor = Depends(require_receptionist),
+    bucket: Optional[str] = Query(default=None, description="Age bucket: 0-7, 8-30, 31-90 or 90+ (days since the bill)"),
+    actor: CurrentActor = Depends(require_permission("payment.view")),
     db: Session = Depends(get_db),
 ):
-    return list_due_invoices(db, actor.tenant_id, query=q, limit=limit)
+    return list_due_invoices(db, actor.tenant_id, query=q, limit=limit, bucket=bucket)
 
 
 @router.post("/invoices/{invoice_id}/settle-due", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED, summary="Settle or partially pay an outstanding invoice due")
 def settle_due(
     invoice_id: int,
     data: DueSettlementRequest,
-    actor: CurrentActor = Depends(require_receptionist),
+    actor: CurrentActor = Depends(require_permission("payment.take")),
     db: Session = Depends(get_db),
 ):
     pmt = settle_invoice_due(
@@ -96,6 +100,7 @@ def settle_due(
         amount=pmt.amount,
         method=pmt.method,
         reference=pmt.reference,
+        channel_detail=pmt.channel_detail,
         change_amount=pmt.change_amount,
         received_at=pmt.received_at,
         received_by_id=pmt.received_by_id,
@@ -106,7 +111,7 @@ def settle_due(
 @router.get("/history", response_model=List[PaymentResponse], summary="View permitted payment history")
 def get_payment_history(
     limit: int = Query(default=50, le=200),
-    actor: CurrentActor = Depends(require_receptionist),
+    actor: CurrentActor = Depends(require_permission("payment.view")),
     db: Session = Depends(get_db),
 ):
     stmt = (
@@ -123,6 +128,7 @@ def get_payment_history(
             amount=p.amount,
             method=p.method,
             reference=p.reference,
+            channel_detail=p.channel_detail,
             change_amount=p.change_amount,
             received_at=p.received_at,
             received_by_id=p.received_by_id,
@@ -131,3 +137,63 @@ def get_payment_history(
         for p in pmts
     ]
 
+
+
+# ---------------------------------------------------------------- Module 18 (Prompt 17)
+from pydantic import BaseModel, Field
+from backend.app.services import dues_service
+
+
+class WriteOffRequest(BaseModel):
+    amount: int = Field(..., gt=0, description="Whole Taka to write off as bad debt")
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class WriteOffDecision(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+@router.get("/dues/call-list", summary="Patients with outstanding dues, oldest first, with 7 / 30 / 90 day age buckets (derived)")
+def dues_call_list(
+    bucket: Optional[str] = Query(default=None, description="0-7, 8-30, 31-90 or 90+"),
+    q: Optional[str] = Query(default=None),
+    actor: CurrentActor = Depends(require_permission("payment.view")),
+    db: Session = Depends(get_db),
+):
+    return dues_service.call_list(db, actor.tenant_id, bucket, q)
+
+
+@router.get("/dues/write-offs", summary="Write-off records and requests (Admin/Owner)")
+def list_write_offs(
+    status_filter: Optional[str] = Query(default=None, alias="status", description="APPLIED, PENDING_OWNER or REJECTED"),
+    actor: CurrentActor = Depends(require_permission("due.writeoff")),
+    db: Session = Depends(get_db),
+):
+    return dues_service.list_writeoffs(db, actor.tenant_id, status_filter)
+
+
+@router.post("/invoices/{invoice_id}/write-off", status_code=status.HTTP_201_CREATED,
+             summary="Write off part of a patient due as bad debt (Admin within the limit, Owner any amount; above the limit an Admin request waits for the Owner)")
+def write_off_due(
+    invoice_id: int,
+    data: WriteOffRequest,
+    actor: CurrentActor = Depends(require_permission("due.writeoff")),
+    db: Session = Depends(get_db),
+):
+    res = dues_service.write_off(db, actor, invoice_id, data.amount, data.reason)
+    db.commit()
+    return res
+
+
+@router.post("/dues/write-offs/{writeoff_id}/approve", summary="Owner approves a write-off above the Admin limit")
+def approve_write_off(writeoff_id: int, data: WriteOffDecision = WriteOffDecision(), actor: CurrentActor = Depends(require_permission("due.writeoff")), db: Session = Depends(get_db)):
+    res = dues_service.decide_writeoff(db, actor, writeoff_id, True, data.note)
+    db.commit()
+    return res
+
+
+@router.post("/dues/write-offs/{writeoff_id}/reject", summary="Owner rejects a write-off request (nothing changes)")
+def reject_write_off(writeoff_id: int, data: WriteOffDecision = WriteOffDecision(), actor: CurrentActor = Depends(require_permission("due.writeoff")), db: Session = Depends(get_db)):
+    res = dues_service.decide_writeoff(db, actor, writeoff_id, False, data.note)
+    db.commit()
+    return res

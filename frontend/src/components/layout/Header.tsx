@@ -13,16 +13,14 @@ import {
   Shield,
   LogOut,
   ChevronDown,
-  Check,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Badge } from '../common/Badge';
 import { api } from '../../api/client';
-import { GlobalSearchResult, Role } from '../../types';
-import { getRoleHomeRoute } from '../../utils/navigation';
+import { GlobalSearchResult } from '../../types';
 
 export const Header: React.FC = () => {
-  const { user, role, staffName, department, businessDay, logout, switchRole } = useAuth();
+  const { user, role, staffName, department, businessDay, logout } = useAuth();
   const navigate = useNavigate();
 
   // Inline Search State
@@ -119,17 +117,6 @@ export const Header: React.FC = () => {
     setUserMenuOpen(false);
     await logout();
     navigate('/login', { replace: true });
-  };
-
-  const handleRoleSwitch = async (newRole: Role) => {
-    if (newRole === role) return;
-    try {
-      await switchRole(newRole);
-      setUserMenuOpen(false);
-      navigate(getRoleHomeRoute(newRole));
-    } catch (err: unknown) {
-      console.error('Failed to switch acting role:', err);
-    }
   };
 
   const getCategoryIcon = (category: string) => {
@@ -306,7 +293,7 @@ export const Header: React.FC = () => {
               className={`w-9 h-9 rounded-full text-white flex items-center justify-center font-bold text-xs shadow-xs border shrink-0 ${
                 role === 'ADMIN' || role === 'OWNER'
                   ? 'bg-[#CF8852] border-[#A85F2C]'
-                  : role === 'LAB_TECH'
+                  : role === 'LAB_TECH' || role === 'DOCTOR'
                   ? 'bg-[#2B547E] border-[#1C3B5E]'
                   : 'bg-[#525333] border-[#373720]'
               }`}
@@ -336,40 +323,11 @@ export const Header: React.FC = () => {
                 <span className="text-[#6D6A60] text-[11px] block">@{user?.username}</span>
                 <div className="mt-2 flex items-center gap-1.5">
                   <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-[#E8E7E3] text-[#525333] border border-[#DCDAD4]">
-                    Acting: {role}
+                    Role: {role}
                   </span>
                   <span className="text-[10px] text-[#8E8A7E] truncate">{department}</span>
                 </div>
               </div>
-
-              {/* Role Switcher if user holds multiple roles */}
-              {user?.roles && user.roles.length > 1 && (
-                <div className="mb-2 pb-2 border-b border-[#F0EFEA]">
-                  <span className="px-2 py-1 text-[10px] font-bold text-[#8E8A7E] uppercase tracking-wider block">
-                    Switch Acting Role
-                  </span>
-                  <div className="space-y-0.5 mt-1">
-                    {user.roles.map((r) => {
-                      const isActive = r === role;
-                      return (
-                        <button
-                          key={r}
-                          onClick={() => handleRoleSwitch(r)}
-                          data-testid={`switch-role-${r.toLowerCase()}`}
-                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs cursor-pointer transition-colors ${
-                            isActive
-                              ? 'bg-[#E8E7E3] text-[#1B1B0E] font-semibold'
-                              : 'hover:bg-[#F4F3F0] text-[#54524A]'
-                          }`}
-                        >
-                          <span>{r}</span>
-                          {isActive && <Check className="w-3.5 h-3.5 text-[#525333]" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
 
               {/* Sign Out Action */}
               <button

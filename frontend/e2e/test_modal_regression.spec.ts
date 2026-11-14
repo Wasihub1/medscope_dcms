@@ -1,24 +1,15 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import { openAs } from './support/auth';
 
 /**
- * Helper function for switching roles during automated read-only tests.
- * Scope: read-only navigation verification across role states.
+ * Prompt 08 modal / tab regression specs (read-only: they only open and close modals).
+ * Prompt 10D: sign in through the real login form via the shared `openAs` helper
+ * (e2e/support/auth.ts). The password comes from MEDSCOPE_E2E_PASSWORD, never from code.
  */
-async function selectDevRole(page: Page, targetRole: 'ADMIN' | 'RECEPTIONIST' | 'LAB_TECH') {
-  const username = targetRole === 'ADMIN' ? 'admin_tariq' : targetRole === 'LAB_TECH' ? 'tech_kamal' : 'reception_fatima';
-  if (page.url().includes('/login')) {
-    await page.fill('#username', username);
-    await page.fill('#password', 'test_pass_secure_2026');
-    await page.click('[data-testid="login-submit-btn"]');
-    await page.waitForLoadState('networkidle');
-  }
-}
 
 test.describe('Part A — Modal / Tab Navigation Regression Specs', () => {
   test('A1: Invoices detail modal preserves /invoices URL and active tab', async ({ page }) => {
-    await page.goto('/invoices');
-    await selectDevRole(page, 'RECEPTIONIST');
-    await page.waitForLoadState('networkidle');
+    await openAs(page, 'RECEPTIONIST', '/invoices');
 
     // Verify initial active tab is Invoices
     const invoicesNavLink = page.locator('nav a[href="/invoices"]');
@@ -53,9 +44,7 @@ test.describe('Part A — Modal / Tab Navigation Regression Specs', () => {
   });
 
   test('A2: Invoices -> Patient History opens in-place without switching background to Patients', async ({ page }) => {
-    await page.goto('/invoices');
-    await selectDevRole(page, 'RECEPTIONIST');
-    await page.waitForLoadState('networkidle');
+    await openAs(page, 'RECEPTIONIST', '/invoices');
 
     // Set filter before opening modal
     const filterInput = page.locator('input[placeholder*="Filter by bill"]');
@@ -95,9 +84,7 @@ test.describe('Part A — Modal / Tab Navigation Regression Specs', () => {
   });
 
   test('A3: Patients page history drawer preserves /patients URL and tab state', async ({ page }) => {
-    await page.goto('/patients');
-    await selectDevRole(page, 'RECEPTIONIST');
-    await page.waitForLoadState('networkidle');
+    await openAs(page, 'RECEPTIONIST', '/patients');
 
     const patientsNavLink = page.locator('nav a[href="/patients"]');
     await expect(patientsNavLink).toHaveClass(/bg-\[#CF8852\]/);
@@ -109,6 +96,10 @@ test.describe('Part A — Modal / Tab Navigation Regression Specs', () => {
 
       const dialog = page.locator('div[role="dialog"]');
       await expect(dialog).toBeVisible();
+
+      // Prompt 10E Part 4: OTHER shows a channel-name field (nothing is submitted)
+      await page.locator('[data-testid="dues-payment-method-select"]').selectOption('OTHER');
+      await expect(page.locator('[data-testid="dues-channel-detail-input"]')).toBeVisible();
 
       // Check tab still Patients
       await expect(patientsNavLink).toHaveClass(/bg-\[#CF8852\]/);
@@ -123,9 +114,7 @@ test.describe('Part A — Modal / Tab Navigation Regression Specs', () => {
   });
 
   test('A4: Dues settlement modal preserves /dues URL and tab state', async ({ page }) => {
-    await page.goto('/dues');
-    await selectDevRole(page, 'RECEPTIONIST');
-    await page.waitForLoadState('networkidle');
+    await openAs(page, 'RECEPTIONIST', '/dues');
 
     const duesNavLink = page.locator('nav a[href="/dues"]');
     await expect(duesNavLink).toHaveClass(/bg-\[#CF8852\]/);
@@ -151,12 +140,14 @@ test.describe('Part A — Modal / Tab Navigation Regression Specs', () => {
   });
 
   test('A5: Ready Reports printable preview modal preserves /reports URL and tab state', async ({ page }) => {
-    await page.goto('/reports');
-    await selectDevRole(page, 'RECEPTIONIST');
-    await page.waitForLoadState('networkidle');
+    await openAs(page, 'RECEPTIONIST', '/reports');
 
     const reportsNavLink = page.locator('nav a[href="/reports"]');
     await expect(reportsNavLink).toHaveClass(/bg-\[#CF8852\]/);
+
+    // Prompt 10F: /reports opens on "Ready Results"; issued reports (print) are on the second tab
+    await expect(page.locator('[data-testid="reports-tab-READY"]')).toHaveAttribute('aria-selected', 'true');
+    await page.locator('[data-testid="reports-tab-ISSUED"]').click();
 
     const printBtn = page.locator('button[title="Preview & Print Report"]').first();
     if (await printBtn.isVisible()) {
@@ -176,16 +167,26 @@ test.describe('Part A — Modal / Tab Navigation Regression Specs', () => {
   });
 
   test('A6: Technician Worklist modals preserve /worklist URL and tab state', async ({ page }) => {
-    await page.goto('/worklist');
-    await selectDevRole(page, 'LAB_TECH');
-    await page.waitForLoadState('networkidle');
+    await openAs(page, 'LAB_TECH', '/worklist');
 
     const worklistNavLink = page.locator('nav a[href="/worklist"]');
     await expect(worklistNavLink).toHaveClass(/bg-\[#CF8852\]/);
     expect(page.url()).toContain('/worklist');
 
-    // Switch back to receptionist
-    await selectDevRole(page, 'RECEPTIONIST');
+    // Prompt 10E Part 7: room-based worklist — the technician's room is shown in the header
+    await expect(page.locator('h1')).toContainText('Room 101');
+
+    // Prompt 10E Part 8: Bento tiles are filters (read-only: only changes the view)
+    const tile = page.locator('[data-testid="worklist-tile-SAMPLE_PENDING"]');
+    await tile.click();
+    await expect(tile).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('[data-testid="worklist-tile-ALL"]')).toHaveAttribute('aria-pressed', 'false');
+    await tile.click(); // click again clears the filter
+    await expect(tile).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('[data-testid="worklist-tile-ALL"]')).toHaveAttribute('aria-pressed', 'true');
+    // Unassigned tile is for Admin/Owner only
+    await expect(page.locator('[data-testid="worklist-tile-UNASSIGNED"]')).toHaveCount(0);
+    expect(page.url()).toContain('/worklist');
   });
 });
 

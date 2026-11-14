@@ -19,6 +19,12 @@ import { ReportsPage } from './features/reports/ReportsPage';
 import { BusinessDayPage } from './features/business_day/BusinessDayPage';
 import { ProfilePage } from './features/profile/ProfilePage';
 import { TechnicianWorklistPage } from './features/worklist/TechnicianWorklistPage';
+import { UserManagementPage } from './features/users/UserManagementPage';
+import { CatalogAdminPage } from './features/admin/CatalogAdminPage';
+import { AuditLogPage } from './features/admin/AuditLogPage';
+import { DoctorApprovalsPage } from './features/doctor/DoctorApprovalsPage';
+import { SettingsPage } from './features/admin/SettingsPage';
+import { AccountingPage } from './features/accounting/AccountingPage';
 
 const ProtectedLayout: React.FC = () => {
   const { isAuthenticated, isLoading, user } = useAuth();
@@ -64,6 +70,12 @@ export function App() {
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/business-day" element={<BusinessDayPage />} />
               <Route path="/profile" element={<ProfilePage />} />
+              <Route path="/users" element={<UserManagementPage />} />
+              <Route path="/catalog-admin" element={<CatalogAdminPage />} />
+              <Route path="/audit-log" element={<AuditLogPage />} />
+              <Route path="/doctor-approvals" element={<DoctorApprovalsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/accounting" element={<AccountingPage />} />
             </Route>
 
             {/* Branded 404 Route for Unknown Paths */}

@@ -61,6 +61,7 @@ def execute_global_search(
         .join(Invoice.patient)
         .where(
             Invoice.tenant_id == tenant_id,
+            Invoice.status != "DRAFT",
             or_(
                 Invoice.invoice_no.ilike(f"%{clean_q}%"),
                 Patient.name.ilike(f"%{clean_q}%"),
@@ -88,6 +89,7 @@ def execute_global_search(
         .where(
             Test.tenant_id == tenant_id,
             Test.active == True,
+            Test.deleted_at.is_(None),
             or_(
                 Test.code.ilike(f"%{clean_q}%"),
                 Test.name.ilike(f"%{clean_q}%"),

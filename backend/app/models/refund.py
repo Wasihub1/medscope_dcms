@@ -36,7 +36,7 @@ class RefundRequest(Base):
     disbursement_method: Mapped[str | None] = mapped_column(String(50), nullable=True)  # CASH, BKASH, etc.
     disbursement_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    invoice: Mapped["Invoice"] = relationship("Invoice")
+    invoice: Mapped["Invoice"] = relationship("Invoice", back_populates="refund_requests")
     invoice_line: Mapped["InvoiceLine"] = relationship("InvoiceLine")
     requested_by: Mapped["Staff"] = relationship("Staff", foreign_keys=[requested_by_id])
     reviewed_by: Mapped["Staff | None"] = relationship("Staff", foreign_keys=[reviewed_by_id])

@@ -18,6 +18,9 @@ class TestComponentResponse(BaseSchema):
     impossible_min: Optional[float] = None
     impossible_max: Optional[float] = None
     sort_order: int = 0
+    # Prompt 14 (D24): the band chosen for THIS patient (sex + age in days) and how it matched
+    reference_range_version_id: Optional[int] = None
+    range_match: Optional[str] = None  # MATCHED, FALLBACK_ANY, NO_BAND
 
 
 class ComponentResultInput(BaseModel):
@@ -44,6 +47,8 @@ class ResultEntryRequest(BaseModel):
     comments: Optional[str] = None
     structured_data: Optional[Dict[str, Any]] = None
     items: List[ComponentResultInput] = []
+    # Prompt 16: the updated_at the editor last loaded; a different stored value means someone else saved since (409).
+    expected_updated_at: Optional[datetime] = None
 
 
 class ResultItemResponse(BaseSchema):
@@ -64,6 +69,8 @@ class ResultItemResponse(BaseSchema):
     flag: Optional[str] = None  # NORMAL, LOW, HIGH, CRITICAL, None
     comment: Optional[str] = None
     sort_order: int = 0
+    reference_range_version_id: Optional[int] = None  # Prompt 14: band version used (None before Prompt 14)
+    range_match: Optional[str] = None  # MATCHED, FALLBACK_ANY, NO_BAND
 
 
 class ResultResponse(BaseSchema):
@@ -79,6 +86,7 @@ class ResultResponse(BaseSchema):
     entered_by_name: Optional[str] = None
     entered_at: datetime
     updated_at: datetime
+    updated_by_name: Optional[str] = None
     items: List[ResultItemResponse] = []
 
 

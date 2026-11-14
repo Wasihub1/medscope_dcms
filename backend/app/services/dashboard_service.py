@@ -59,7 +59,7 @@ def get_receptionist_dashboard_data(
     stmt_due = select(func.coalesce(func.sum(Invoice.due), 0)).where(
         Invoice.tenant_id == tenant_id,
         Invoice.due > 0,
-        Invoice.status != "CANCELLED",
+        Invoice.status.not_in(["CANCELLED", "DRAFT"]),
     )
     outstanding_dues = db.execute(stmt_due).scalar_one()
 
@@ -110,7 +110,7 @@ def get_receptionist_dashboard_data(
     # 9. Recent Invoices
     stmt_recent = (
         select(Invoice)
-        .where(Invoice.tenant_id == tenant_id)
+        .where(Invoice.tenant_id == tenant_id, Invoice.status != "DRAFT")
         .order_by(desc(Invoice.created_at))
         .limit(8)
     )

@@ -52,7 +52,7 @@ def test_p04_01_prescriber_and_referrer_separation_and_write_only_commission(cli
     assert "commission_rate" not in agent, "Commission rate leaked in ReferrerResponse!"
 
     # 3. Query referrers with type filter Doctor
-    filter_res = client.get("/referrers?type=Doctor", headers=RECEPTIONIST_HEADERS)
+    filter_res = client.get(f"/referrers?type=Doctor&q={ts}", headers=RECEPTIONIST_HEADERS)
     assert filter_res.status_code == 200, filter_res.text
     doc_list = filter_res.json()
     assert any(d["id"] == doctor["id"] for d in doc_list)
@@ -96,6 +96,8 @@ def test_p04_03_test_deduplication_validation(client):
     # Attempt to create invoice with duplicate test lines
     inv_payload = {
         "patient_id": patient["id"],
+        "age_value": 35,  # Prompt 10E: Finalize requires age and gender
+        "gender": "Male",
         "lines": [
             {"test_id": 1, "is_urgent": False, "discount_type": "NONE", "discount_value": 0},
             {"test_id": 1, "is_urgent": False, "discount_type": "NONE", "discount_value": 0},  # Duplicate!
@@ -121,6 +123,8 @@ def test_p04_04_zero_default_payment_and_unpaid_status(client):
     # Create invoice with NO initial payment (initial_payment = None)
     inv_payload = {
         "patient_id": patient["id"],
+        "age_value": 35,  # Prompt 10E: Finalize requires age and gender
+        "gender": "Male",
         "lines": [
             {"test_id": 1, "is_urgent": False, "discount_type": "NONE", "discount_value": 0},
         ],
@@ -157,6 +161,8 @@ def test_p04_05_dynamic_refund_status_lifecycle(client):
     # Create paid invoice (Test #1 is Tk 400)
     inv_payload = {
         "patient_id": patient["id"],
+        "age_value": 35,  # Prompt 10E: Finalize requires age and gender
+        "gender": "Male",
         "lines": [
             {"test_id": 1, "is_urgent": False, "discount_type": "NONE", "discount_value": 0},
         ],
@@ -186,12 +192,18 @@ def test_p04_05_dynamic_refund_status_lifecycle(client):
     ref_res = client.post("/refunds/request", headers=RECEPTIONIST_HEADERS, json=ref_payload)
     assert ref_res.status_code in [200, 201], ref_res.text
 
-    # Re-fetch invoice: refund_status must now dynamically reflect REFUND_PENDING
+    # Prompt 13A: no approval step for pre-lock cancellation. The refund is approved at once and awaits payout.
     detail_res = client.get(f"/invoices/{inv['id']}", headers=RECEPTIONIST_HEADERS)
     assert detail_res.status_code == 200, detail_res.text
     detail = detail_res.json()
-    assert detail["refund_status"] == "REFUND_PENDING"
+    assert detail["refund_status"] == "REFUND_APPROVED"
     assert len(detail.get("refund_requests", [])) >= 1
+
+    # After payout every line is cancelled and the money is back: fully refunded
+    dis = client.post(f"/refunds/disburse/{ref_res.json()['id']}", headers=RECEPTIONIST_HEADERS, json={"method": "CASH"})
+    assert dis.status_code == 200, dis.text
+    detail = client.get(f"/invoices/{inv['id']}", headers=RECEPTIONIST_HEADERS).json()
+    assert detail["refund_status"] == "FULLY_REFUNDED"
 
 
 def test_p04_06_user_friendly_status_filter_events(client):

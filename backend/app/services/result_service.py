@@ -3,6 +3,8 @@ from typing import List, Optional, Tuple, Dict, Any
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from backend.app.core.permissions import has_permission
+from backend.app.core.samples import SAMPLE_REQUIRED_MESSAGE, requires_sample
 from backend.app.core.timezone import utc_now
 from backend.app.core.security import CurrentActor
 from backend.app.models.test import Test, TestComponent
@@ -18,11 +20,15 @@ from backend.app.schemas.result import (
     ResultTemplateResponse,
 )
 from backend.app.services.audit_service import log_audit_event
+from backend.app.services import reference_range_service as rrs
+from backend.app.services.line_lock_service import lock_line_at_result_completion
+from backend.app.services.routing_service import ensure_order_access, record_actor
 
 
 def validate_and_compute_flag(
     comp: Optional[TestComponent],
     raw_value: str,
+    band: Optional[Any] = None,
 ) -> Tuple[Optional[float], Optional[str]]:
     """
     Module 13 Invariant:
@@ -30,7 +36,12 @@ def validate_and_compute_flag(
        Raises HTTP 400 with an explicit message if limits are violated.
     2. Automatically determines result flag: LOW, HIGH, CRITICAL, NORMAL, or None.
     3. Handles missing or incomplete configuration safely (never silently classifies as normal).
+    Prompt 14 (D24): the reference / critical limits come from `band` (the ReferenceRangeVersion chosen for
+    this patient by sex and age in days); impossible-value limits stay on the component. When `band` is None
+    the limits are read from `comp` (only objects that still carry them, e.g. unit-test stand-ins); a real
+    TestComponent has none, so no band means no flag.
     """
+    limits = band if band is not None else comp
     if not raw_value or not raw_value.strip():
         return None, None
 
@@ -66,19 +77,21 @@ def validate_and_compute_flag(
         )
 
     # 2. Critical Limits Check (Section 3.3)
-    if comp.critical_min is not None and val < comp.critical_min:
+    c_min, c_max = getattr(limits, "critical_min", None), getattr(limits, "critical_max", None)
+    r_min, r_max = getattr(limits, "ref_min", None), getattr(limits, "ref_max", None)
+    if c_min is not None and val < c_min:
         return val, "CRITICAL"
-    if comp.critical_max is not None and val > comp.critical_max:
+    if c_max is not None and val > c_max:
         return val, "CRITICAL"
 
     # 3. Normal / Low / High Reference Range Check
-    if comp.ref_min is not None and val < comp.ref_min:
+    if r_min is not None and val < r_min:
         return val, "LOW"
-    if comp.ref_max is not None and val > comp.ref_max:
+    if r_max is not None and val > r_max:
         return val, "HIGH"
 
     # If within configured ref_min and ref_max
-    if comp.ref_min is not None or comp.ref_max is not None:
+    if r_min is not None or r_max is not None:
         return val, "NORMAL"
 
     # Missing or incomplete reference limits: safe fallback, do NOT silently assume NORMAL
@@ -100,11 +113,8 @@ def get_result_template(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test order not found.")
 
     # Access Boundary: Technician can only access assigned tasks (unless supervisor/admin)
-    if actor.role == "LAB_TECH" and order.assigned_to_id != actor.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only enter results for your assigned tasks.",
-        )
+    # Prompt 10E Part 7: room-based access (every technician of the room, Admin/Owner, doctor queue)
+    ensure_order_access(actor, order, "You can only enter results for orders in your room.")
 
     # Ineligible Check: Cancelled, Rejected, or Spoiled tasks cannot proceed to ordinary result entry
     if order.status in ("CANCELLED", "REJECTED", "SPOILED"):
@@ -120,19 +130,22 @@ def get_result_template(
             detail=f"Specimen is '{sample.status}'. Result entry is prohibited under D15 rule.",
         )
 
-    # For biological tests, verify sample collection
+    # For biological tests, verify sample collection (Prompt 10E: one requires_sample helper)
     test = order.invoice_line.test
-    is_imaging = test.requires_doctor or test.performing_role == "DOCTOR" or test.report_template == "NARRATIVE"
-    if not is_imaging and (not sample or sample.status != "COLLECTED"):
+    # Prompt 10F (F4): NULL/empty sample_type on a non-imaging test now requires a sample
+    if requires_sample(test, order) and (not sample or sample.status != "COLLECTED"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Specimen has not been collected yet. Results can only be entered after sample collection.",
+            detail=SAMPLE_REQUIRED_MESSAGE,
         )
 
     inv = order.invoice_line.invoice
     patient = inv.patient
     visit = inv.visit
     age_str = f"{visit.age_value} {visit.age_unit}" if visit else None
+    # Prompt 14 (D24): entered age + visit date -> total days; recorded gender -> sex key
+    age_days = rrs.age_to_days(visit.age_value, visit.age_unit, visit.created_at.date() if visit.created_at else None) if visit else 0
+    sex = rrs.sex_key(visit.gender if visit and visit.gender else patient.gender)
 
     # Fetch configured components
     components = (
@@ -149,24 +162,27 @@ def get_result_template(
         .all()
     )
 
-    component_responses = [
-        TestComponentResponse(
+    bands = rrs.bands_by_component(db, [c.id for c in components])
+    component_responses = []
+    for c in components:
+        band, match = rrs.pick_band(bands.get(c.id, []), sex, age_days)
+        component_responses.append(TestComponentResponse(
             id=c.id,
             test_id=c.test_id,
             code=c.code,
             name=c.name,
             unit=c.unit,
-            reference_range_text=c.reference_range_text,
-            ref_min=c.ref_min,
-            ref_max=c.ref_max,
-            critical_min=c.critical_min,
-            critical_max=c.critical_max,
+            reference_range_text=band.reference_range_text if band else None,
+            ref_min=band.ref_min if band else None,
+            ref_max=band.ref_max if band else None,
+            critical_min=band.critical_min if band else None,
+            critical_max=band.critical_max if band else None,
             impossible_min=c.impossible_min,
             impossible_max=c.impossible_max,
             sort_order=c.sort_order,
-        )
-        for c in components
-    ]
+            reference_range_version_id=band.id if band else None,
+            range_match=match,
+        ))
 
     existing_result = None
     if order.result:
@@ -190,6 +206,8 @@ def get_result_template(
                 flag=it.flag,
                 comment=it.comment,
                 sort_order=it.sort_order,
+                reference_range_version_id=it.reference_range_version_id,
+                range_match=it.range_match,
             )
             for it in res.items
         ]
@@ -207,6 +225,7 @@ def get_result_template(
             entered_by_name=staff.display_name if staff else None,
             entered_at=res.entered_at,
             updated_at=res.updated_at,
+            updated_by_name=res.updated_by.display_name if res.updated_by else None,
             items=item_responses,
         )
 
@@ -249,11 +268,8 @@ def save_test_result(
     if not order or order.tenant_id != tenant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Test order not found.")
 
-    if actor.role == "LAB_TECH" and order.assigned_to_id != actor.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only enter results for your assigned tasks.",
-        )
+    # Prompt 10E Part 7: room-based access (every technician of the room, Admin/Owner, doctor queue)
+    ensure_order_access(actor, order, "You can only enter results for orders in your room.")
 
     # Fix 4(a): Reject saving results if order is already COMPLETED (HTTP 409)
     if order.status == "COMPLETED":
@@ -261,6 +277,31 @@ def save_test_result(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cannot enter or modify results for a completed test order. Completed orders are immutable.",
         )
+
+    # Prompt 16 (Module 14): a Final report or a recorded doctor approval closes the result.
+    if order.report_version is not None and order.report_version.status == "FINAL_AUTHORIZED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This test already has a Final report. Its result can no longer be changed (corrections are a separate, later module).",
+        )
+    if order.doctor_approval is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A doctor approval is already recorded for this result, so it can no longer be changed.",
+        )
+    # Prompt 16: simple optimistic lock so two people cannot silently overwrite each other's draft.
+    if data.expected_updated_at is not None and order.result is not None:
+        exp = data.expected_updated_at
+        cur = order.result.updated_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=cur.tzinfo)
+        if abs((cur - exp).total_seconds()) > 0.001:
+            who = order.result.updated_by or order.result.entered_by
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"This result was changed by {who.display_name if who else 'another user'} at "
+                       f"{cur.astimezone().strftime('%d %b %Y %H:%M')} after you opened it. Close and reopen it to see their changes.",
+            )
 
     if order.status in ("CANCELLED", "REJECTED", "SPOILED"):
         raise HTTPException(
@@ -271,14 +312,12 @@ def save_test_result(
     test = order.invoice_line.test
 
     # Fix 4(c): For sample-based tests, reject result saving before specimen collection (HTTP 409)
-    is_imaging = test.requires_doctor or test.performing_role == "DOCTOR" or test.report_template == "NARRATIVE"
-    requires_sample = (test.sample_type is not None) or (order.sample_route == "FULL")
-    if requires_sample and not is_imaging:
+    if requires_sample(test, order):
         sample = order.sample
         if not sample or sample.status != "COLLECTED":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Specimen has not been collected yet. Results cannot be entered or saved before sample collection.",
+                detail=SAMPLE_REQUIRED_MESSAGE,
             )
 
     now_ts = utc_now()
@@ -301,6 +340,13 @@ def save_test_result(
         comps_by_id[c.id] = c
         comps_by_code[c.code.upper()] = c
 
+    # Prompt 14 (D24): the patient sex and total age in days at the visit pick each component band
+    visit = order.invoice_line.invoice.visit
+    patient = order.invoice_line.invoice.patient
+    age_days = rrs.age_to_days(visit.age_value, visit.age_unit, visit.created_at.date() if visit.created_at else None) if visit else 0
+    sex = rrs.sex_key(visit.gender if visit and visit.gender else (patient.gender if patient else None))
+    bands = rrs.bands_by_component(db, [c.id for c in db_comps])
+
     # 1. Validate all component inputs and compute flags
     processed_items: List[Dict[str, Any]] = []
     for item_input in data.items:
@@ -310,15 +356,22 @@ def save_test_result(
         elif item_input.component_code and item_input.component_code.upper() in comps_by_code:
             comp = comps_by_code[item_input.component_code.upper()]
 
-        # Compute flag & validate impossible values (raises HTTP 400 on absurd values)
-        numeric_val, auto_flag = validate_and_compute_flag(comp, item_input.value)
+        # Prompt 14: band by sex + age in days (the server decides; a client-sent range is never used for a known component)
+        band, range_match = (rrs.pick_band(bands.get(comp.id, []), sex, age_days) if comp else (None, None))
 
-        # Snapshot applicable reference ranges
-        ref_text = comp.reference_range_text if comp else item_input.reference_range
-        ref_min = comp.ref_min if comp else item_input.ref_min
-        ref_max = comp.ref_max if comp else item_input.ref_max
-        crit_min = comp.critical_min if comp else item_input.critical_min
-        crit_max = comp.critical_max if comp else item_input.critical_max
+        # Compute flag & validate impossible values (raises HTTP 400 on absurd values)
+        numeric_val, auto_flag = validate_and_compute_flag(comp, item_input.value, band)
+
+        # Snapshot applicable reference ranges (D24: the values used now; later versions never change them)
+        if comp:
+            ref_text = band.reference_range_text if band else None
+            ref_min = band.ref_min if band else None
+            ref_max = band.ref_max if band else None
+            crit_min = band.critical_min if band else None
+            crit_max = band.critical_max if band else None
+        else:
+            ref_text, ref_min, ref_max = item_input.reference_range, item_input.ref_min, item_input.ref_max
+            crit_min, crit_max = item_input.critical_min, item_input.critical_max
         imp_min = comp.impossible_min if comp else item_input.impossible_min
         imp_max = comp.impossible_max if comp else item_input.impossible_max
         unit = comp.unit if comp else item_input.unit
@@ -338,6 +391,8 @@ def save_test_result(
             "impossible_min": imp_min,
             "impossible_max": imp_max,
             "flag": auto_flag,
+            "reference_range_version_id": band.id if band else None,
+            "range_match": range_match,
             "comment": item_input.comment.strip() if item_input.comment else None,
             "sort_order": item_input.sort_order if item_input.sort_order else (comp.sort_order if comp else 0),
         })
@@ -357,6 +412,7 @@ def save_test_result(
             entered_by_id=actor.id,
             entered_at=now_ts,
             updated_at=now_ts,
+            updated_by_id=actor.id,
         )
         db.add(result)
         db.flush()
@@ -367,6 +423,7 @@ def save_test_result(
         result.comments = data.comments.strip() if data.comments else None
         result.structured_data = data.structured_data
         result.updated_at = now_ts
+        result.updated_by_id = actor.id
         # Clear existing items for replacement
         result.items.clear()
         db.flush()
@@ -390,6 +447,8 @@ def save_test_result(
             impossible_min=p["impossible_min"],
             impossible_max=p["impossible_max"],
             flag=p["flag"],
+            reference_range_version_id=p["reference_range_version_id"],
+            range_match=p["range_match"],
             comment=p["comment"],
             sort_order=p["sort_order"],
         )
@@ -406,9 +465,11 @@ def save_test_result(
                 order.status = "IN_PROGRESS"
             else:
                 order.status = "COMPLETED"
+                lock_line_at_result_completion(order, now_ts)  # Prompt 12
         else:
             order.status = "IN_PROGRESS"
     # Fix 4(b): Saving a DRAFT does NOT change or advance the TestOrder status
+    record_actor(order, actor)  # Prompt 10E: who acted (not used for visibility)
 
     # 5. Append lifecycle history event
     event_action = "RESULT_SAVED_DRAFT" if result_status == "DRAFT" else "RESULT_ENTERED"
@@ -459,6 +520,8 @@ def save_test_result(
             flag=it.flag,
             comment=it.comment,
             sort_order=it.sort_order,
+            reference_range_version_id=it.reference_range_version_id,
+            range_match=it.range_match,
         )
         for it in result.items
     ]
@@ -563,17 +626,19 @@ def seed_default_test_components(db: Session, tenant_id: str) -> int:
                     code=it["code"],
                     name=it["name"],
                     unit=it["unit"],
-                    reference_range_text=it["ref_text"],
-                    ref_min=it["ref_min"],
-                    ref_max=it["ref_max"],
-                    critical_min=it["critical_min"],
-                    critical_max=it["critical_max"],
                     impossible_min=it["imp_min"],
                     impossible_max=it["imp_max"],
                     sort_order=it["sort"],
                     active=True,
                 )
                 db.add(comp)
+                db.flush()
+                # D24: the demo range values become version 1 of one band (any sex, all ages)
+                rrs.add_first_version(
+                    db, tenant_id, comp, ref_min=it["ref_min"], ref_max=it["ref_max"],
+                    critical_min=it["critical_min"], critical_max=it["critical_max"],
+                    reference_range_text=it["ref_text"], note="Version 1: demo catalog range",
+                )
                 count += 1
 
     if count > 0:

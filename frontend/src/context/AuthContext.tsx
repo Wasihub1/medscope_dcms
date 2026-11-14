@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Role, BusinessDay, AuthUser } from '../types';
+import { Role, BusinessDayState, AuthUser } from '../types';
 import { api, setUnauthorizedCallback } from '../api/client';
 
 interface AuthContextType {
@@ -9,13 +9,15 @@ interface AuthContextType {
   staffId: string;
   department: string;
   tenantName: string;
-  businessDay: BusinessDay | null;
+  /** Prompt 13B: the open day, or null when closed. Same value for every role. */
+  businessDay: BusinessDayState | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   isLoadingBusinessDay: boolean;
   login: (username: string, password: string, role?: string) => Promise<AuthUser>;
   logout: () => Promise<void>;
-  switchRole: (role: string) => Promise<void>;
+  /** Prompt 10D: effective permission check (role defaults + per-user overrides, from /auth/me) */
+  hasPermission: (key: string) => boolean;
   refreshBusinessDay: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -25,7 +27,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [businessDay, setBusinessDay] = useState<BusinessDay | null>(null);
+  const [businessDay, setBusinessDay] = useState<BusinessDayState | null>(null);
   const [isLoadingBusinessDay, setIsLoadingBusinessDay] = useState<boolean>(false);
 
   const tenantName = 'Seba Diagnostic Center (সেবা ডায়াগনস্টিক সেন্টার)';
@@ -33,8 +35,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshBusinessDay = useCallback(async () => {
     setIsLoadingBusinessDay(true);
     try {
-      const day = await api.getCurrentBusinessDay();
-      setBusinessDay(day);
+      // Money-free state endpoint: every authenticated role can read it (Lab Tech has no business_day.view).
+      const day = await api.getBusinessDayState();
+      setBusinessDay(day.is_open ? day : null);
     } catch {
       setBusinessDay(null);
     } finally {
@@ -88,12 +91,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const switchRole = async (newRole: string) => {
-    const updated = await api.switchActingRole(newRole);
-    setUser(updated);
-  };
+  // Prompt 10D: one login = one fixed role; no role switching.
+  const hasPermission = useCallback(
+    (key: string) => Boolean(user?.permissions?.includes(key)),
+    [user]
+  );
 
-  const role: Role = user?.acting_role || 'RECEPTIONIST';
+  const role: Role = (user?.role || user?.acting_role || 'RECEPTIONIST') as Role;
   const staffName = user?.display_name || '';
   const staffId = String(user?.id || '');
   const department = user?.department || 'General';
@@ -113,7 +117,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoadingBusinessDay,
         login,
         logout,
-        switchRole,
+        hasPermission,
         refreshBusinessDay,
         refreshUser,
       }}

@@ -12,20 +12,28 @@ import {
   Shield,
   Eye,
   Filter,
+  FileText,
+  Loader2,
 } from 'lucide-react';
 import { api } from '../../api/client';
-import { DeliverableReportItem } from '../../types';
+import { DeliverableReportItem, ResultPreview } from '../../types';
+import { ResultPreviewBody } from '../../components/common/ResultReportPreviewModal';
 import { Badge } from '../../components/common/Badge';
 import { Modal } from '../../components/common/Modal';
 import { PrintableReportModal } from '../../components/common/PrintableReportModal';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { ReadyResultsPanel } from './ReadyResultsPanel';
+import { SettleDueModal } from '../../components/common/SettleDueModal';
 
 export const ReportsPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const searchParam = searchParams.get('search');
   const idParam = searchParams.get('id');
 
+  // Prompt 10F (F3): "Ready Results" (submitted lab results, all rooms) is the default view;
+  // "Issued Reports" keeps the report_versions list (filled once Module 14 issues reports).
+  const [view, setView] = useState<'READY' | 'ISSUED'>(idParam ? 'ISSUED' : 'READY');
   const [reports, setReports] = useState<DeliverableReportItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState(searchParam || '');
@@ -45,10 +53,29 @@ export const ReportsPage: React.FC = () => {
   const [overrideReason, setOverrideReason] = useState('');
   const [submittingOverride, setSubmittingOverride] = useState(false);
 
+  // Prompt 16: stored, immutable content of a Final report
+  const [snapshotFor, setSnapshotFor] = useState<DeliverableReportItem | null>(null);
+  const [snapshot, setSnapshot] = useState<ResultPreview | null>(null);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  const openSnapshot = (rep: DeliverableReportItem) => {
+    setSnapshotFor(rep);
+    setSnapshot(null);
+    setSnapshotError(null);
+    api
+      .getReportSnapshot(rep.report_version_id ?? rep.id)
+      .then(setSnapshot)
+      .catch((err: any) => setSnapshotError(err?.message || 'Could not load the stored report.'));
+  };
+
+  // Prompt 17: take the due inline (same modal and endpoint as the Dues page)
+  const [payInvoiceId, setPayInvoiceId] = useState<string | number | null>(null);
+
   // Printable Report Modal State
   const [printModalOpen, setPrintModalOpen] = useState(false);
 
-  const { role } = useAuth();
+  const { hasPermission } = useAuth();
+  // Prompt 10E: only 'report.release_with_due' holders (Admin/Owner) may release with a due, with a reason
+  const canReleaseWithDue = hasPermission('report.release_with_due');
   const { showToast } = useToast();
 
   const fetchReports = async () => {
@@ -58,7 +85,7 @@ export const ReportsPage: React.FC = () => {
       if (searchTerm.trim()) params.search = searchTerm.trim();
       if (hasDueFilter === 'DUE') params.has_due = true;
       if (hasDueFilter === 'CLEAR') params.has_due = false;
-      const res = await api.getDeliverableReports(params);
+      const res = await api.getDeliverableReports({ search: params.search, has_due: params.has_due });
       setReports(res);
     } catch (err: any) {
       showToast({ type: 'error', title: 'Failed to load deliverable reports', message: err.message });
@@ -175,10 +202,11 @@ export const ReportsPage: React.FC = () => {
         <div>
           <h1 className="text-xl font-bold text-[#1B1B0E]">Ready Reports & Delivery</h1>
           <p className="text-xs text-[#6D6A60]">
-            Hand over authorized diagnostic reports to patients. Dues require settlement or Admin override authorization.
+            Results ready from the lab, and issued reports for hand-over. Dues require settlement or Admin override authorization.
           </p>
         </div>
 
+        {view === 'ISSUED' && (
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-[#CAC7BE] rounded-xl shadow-2xs">
             <Search className="w-4 h-4 text-[#8E8A7E]" />
@@ -186,8 +214,9 @@ export const ReportsPage: React.FC = () => {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search patient, invoice, test..."
-              className="text-xs bg-transparent border-none outline-none w-52 text-[#1B1B0E]"
+              placeholder="Bill no. (final / temp), patient no., test, mobile, name..."
+              aria-label="Search reports for handover"
+              className="text-xs bg-transparent border-none outline-none w-72 text-[#1B1B0E]"
             />
           </div>
 
@@ -201,10 +230,34 @@ export const ReportsPage: React.FC = () => {
             <option value="DUE">Held with Dues</option>
           </select>
         </div>
+        )}
       </div>
 
-      {/* Reports Table Card */}
-      <div className="bg-[#FAF9F6] border border-[#DCDAD4] rounded-2xl p-5 shadow-xs">
+      <div className="flex items-center gap-1.5" role="tablist" aria-label="Report views">
+        {([
+          { id: 'READY', label: 'Ready Results' },
+          { id: 'ISSUED', label: 'Issued Reports' },
+        ] as const).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={view === t.id}
+            data-testid={`reports-tab-${t.id}`}
+            onClick={() => setView(t.id)}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#CF8852] ${
+              view === t.id ? 'bg-[#525333] text-white shadow-xs' : 'bg-[#F4F3F0] text-[#54524A] hover:bg-[#E8E7E3]'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'READY' ? (
+        <ReadyResultsPanel />
+      ) : (
+      <div className="bg-[#FAF9F6] border border-[#DCDAD4] rounded-2xl p-5 shadow-xs" data-testid="issued-reports-card">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
@@ -223,12 +276,16 @@ export const ReportsPage: React.FC = () => {
               {reports.length === 0 && !loading && (
                 <tr>
                   <td colSpan={8} className="py-10 text-center text-[#8E8A7E]">
-                    No deliverable reports found matching filter.
+                    {searchTerm.trim() || hasDueFilter !== 'ALL'
+                      ? 'No issued reports match this filter.'
+                      : 'No issued reports yet. Finalize a submitted result (Ready Results tab) to issue its report.'}
                   </td>
                 </tr>
               )}
               {reports.map((rep) => {
                 const hasDue = rep.due_amount > 0;
+                // Prompt 17: held follows the center setting (the server decides); a due can exist without a hold
+                const held = !rep.can_deliver;
                 return (
                   <tr key={rep.id} className="hover:bg-[#F4F3F0] transition-colors">
                     <td className="py-3 pl-2 font-mono font-bold text-[#1B1B0E]">{rep.invoice_number}</td>
@@ -261,7 +318,7 @@ export const ReportsPage: React.FC = () => {
                         <Badge variant="success" size="sm" dot>
                           DELIVERED
                         </Badge>
-                      ) : hasDue ? (
+                      ) : held ? (
                         <Badge variant="danger" size="sm" dot>
                           DUE HOLD
                         </Badge>
@@ -273,6 +330,14 @@ export const ReportsPage: React.FC = () => {
                     </td>
                     <td className="py-3 text-right pr-2 space-x-1.5">
                       <button
+                        onClick={() => openSnapshot(rep)}
+                        data-testid={`issued-view-${rep.id}`}
+                        className="p-1.5 text-[#2B547E] hover:bg-[#EEF3F8] rounded-lg transition-colors cursor-pointer"
+                        title="View the stored result of this Final report"
+                      >
+                        <FileText className="w-4 h-4" />
+                      </button>
+                      <button
                         onClick={() => handleViewPrint(rep)}
                         className="p-1.5 text-[#525333] hover:bg-[#E8E7E3] rounded-lg transition-colors cursor-pointer"
                         title="Preview & Print Report"
@@ -282,7 +347,17 @@ export const ReportsPage: React.FC = () => {
 
                       {!rep.is_delivered && (
                         <>
-                          {!hasDue ? (
+                          {hasDue && (
+                            <button
+                              onClick={() => setPayInvoiceId(rep.invoice_id ?? rep.id)}
+                              data-testid={`handover-pay-${rep.id}`}
+                              className="px-2.5 py-1 bg-white text-[#1E6327] border border-[#C3E6C7] hover:bg-[#EDF7EE] font-semibold rounded-lg text-xs cursor-pointer"
+                              title="Collect the due here, then hand the report over"
+                            >
+                              Take payment
+                            </button>
+                          )}
+                          {!held ? (
                             <button
                               onClick={() => handleOpenDeliver(rep)}
                               className="px-3 py-1 bg-[#2D8A39] hover:bg-[#1E6327] text-white font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer text-xs inline-flex items-center gap-1"
@@ -290,7 +365,7 @@ export const ReportsPage: React.FC = () => {
                               <CheckCircle2 className="w-3.5 h-3.5" />
                               <span>Deliver</span>
                             </button>
-                          ) : role === 'ADMIN' ? (
+                          ) : canReleaseWithDue ? (
                             <button
                               onClick={() => handleOpenOverride(rep)}
                               className="px-2.5 py-1 bg-[#CF8852] hover:bg-[#B7703B] text-white font-semibold rounded-lg shadow-2xs transition-colors cursor-pointer text-xs inline-flex items-center gap-1"
@@ -302,7 +377,7 @@ export const ReportsPage: React.FC = () => {
                           ) : (
                             <span
                               className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#F4F3F0] text-[#8E8A7E] border border-[#DCDAD4] rounded-lg text-[11px] font-medium"
-                              title="Settle due balance or switch to Admin mode to authorize release"
+                              title="Settle the due first, or ask an Admin/Owner to release it with an override reason"
                             >
                               <Lock className="w-3 h-3" />
                               <span>Held</span>
@@ -318,6 +393,31 @@ export const ReportsPage: React.FC = () => {
           </table>
         </div>
       </div>
+      )}
+
+      {payInvoiceId !== null && (
+        <SettleDueModal key={payInvoiceId} invoiceId={payInvoiceId} onClose={() => setPayInvoiceId(null)} onPaid={fetchReports} />
+      )}
+
+      {/* Stored Final report content (Prompt 16) */}
+      <Modal
+        isOpen={snapshotFor !== null}
+        onClose={() => setSnapshotFor(null)}
+        title="Final report"
+        subtitle={snapshotFor ? `${snapshotFor.invoice_number} | ${snapshotFor.test_name}` : undefined}
+        maxWidth="4xl"
+      >
+        {snapshotError ? (
+          <div className="p-3 text-xs text-[#54524A] bg-[#F4F3F0] border border-[#DCDAD4] rounded-xl" data-testid="snapshot-unavailable">{snapshotError}</div>
+        ) : !snapshot ? (
+          <div className="py-10 text-center text-xs text-[#6D6A60]">
+            <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
+            Loading…
+          </div>
+        ) : (
+          <ResultPreviewBody data={snapshot} onClose={() => setSnapshotFor(null)} />
+        )}
+      </Modal>
 
       {/* Deliver Report Modal */}
       <Modal

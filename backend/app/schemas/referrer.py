@@ -25,6 +25,16 @@ class ReferrerCreate(BaseModel):
         return values
 
 
+class ReferrerUpdate(BaseModel):
+    """Prompt 19: edit a doctor / 3rd party's own details. Only the fields sent change. Commission is not editable here."""
+    name: Optional[str] = Field(default=None, min_length=2, max_length=200)
+    referrer_type: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    phone: Optional[str] = Field(default=None, max_length=50)
+    registration_no: Optional[str] = Field(default=None, max_length=100)
+    specialty: Optional[str] = Field(default=None, max_length=200)
+    chamber_address: Optional[str] = Field(default=None, max_length=300)
+
+
 class ReferrerResponse(BaseSchema):
     id: int
     name: str

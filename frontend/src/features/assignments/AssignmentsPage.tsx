@@ -11,13 +11,18 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { api } from '../../api/client';
-import { UnassignedTestOrder, TestDestination } from '../../types';
+import { UnassignedTestOrder, LabRoom } from '../../types';
 import { Badge } from '../../components/common/Badge';
 import { useToast } from '../../context/ToastContext';
+import { AssignedTestsPanel } from './AssignedTestsPanel';
+import { useRefetchOnFocus } from '../../utils/useRefetchOnFocus';
 
 export const AssignmentsPage: React.FC = () => {
+  // Prompt 10F (F1): two views on one page: route UNASSIGNED orders, or see every Assigned Test
+  const [view, setView] = useState<'UNASSIGNED' | 'ASSIGNED'>('UNASSIGNED');
   const [unassigned, setUnassigned] = useState<UnassignedTestOrder[]>([]);
-  const [destinations, setDestinations] = useState<TestDestination[]>([]);
+  // Prompt 10E: the routing target is a lab room (never a technician, never a destination id)
+  const [rooms, setRooms] = useState<LabRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
@@ -32,21 +37,17 @@ export const AssignmentsPage: React.FC = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [orders, dests] = await Promise.all([
+      const [orders, roomList] = await Promise.all([
         api.getUnassignedTests(searchTerm || undefined, departmentFilter !== 'ALL' ? departmentFilter : undefined),
-        api.getDestinations(),
+        api.getRooms(),
       ]);
       setUnassigned(orders);
-      setDestinations(dests);
+      setRooms(roomList);
 
-      // Prepopulate assignmentMap with suggested destination if available
+      // Prepopulate with the order's own room (empty room) when it has one; otherwise no choice yet
       const initialMap: Record<string, string> = {};
       orders.forEach((o) => {
-        if (o.suggested_destination_id) {
-          initialMap[o.id] = o.suggested_destination_id;
-        } else if (dests.length > 0) {
-          initialMap[o.id] = dests[0].id;
-        }
+        if (o.lab_section) initialMap[o.id] = o.lab_section;
       });
       setAssignmentMap(initialMap);
     } catch (err: any) {
@@ -63,19 +64,24 @@ export const AssignmentsPage: React.FC = () => {
     return () => clearTimeout(timer);
   }, [searchTerm, departmentFilter]);
 
-  const handleSelectDestination = (orderId: string, destId: string) => {
-    setAssignmentMap((prev) => ({ ...prev, [orderId]: destId }));
+  // Prompt 10F: refresh when the user comes back (orders may have been demoted or released meanwhile)
+  useRefetchOnFocus(() => {
+    if (view === 'UNASSIGNED') fetchData();
+  });
+
+  const handleSelectDestination = (orderId: string, roomCode: string) => {
+    setAssignmentMap((prev) => ({ ...prev, [orderId]: roomCode }));
   };
 
   const handleAssignSingle = async (order: UnassignedTestOrder) => {
-    const destId = assignmentMap[order.id];
-    if (!destId) {
-      showToast({ type: 'warning', title: 'Select Destination', message: 'Please select a laboratory destination.' });
+    const roomCode = assignmentMap[order.id];
+    if (!roomCode) {
+      showToast({ type: 'warning', title: 'Select a Room', message: 'Please select the lab room for this test.' });
       return;
     }
 
     try {
-      await api.assignTest(order.id, destId, 'Reception routing to workstation');
+      await api.assignTest(order.id, roomCode, 'Reception routing to lab room');
       showToast({
         type: 'success',
         title: 'Workstation Assigned',
@@ -101,17 +107,22 @@ export const AssignmentsPage: React.FC = () => {
 
   const handleBulkAssign = async () => {
     if (selectedIds.length === 0) return;
+    const missing = selectedIds.filter((id) => !assignmentMap[id]);
+    if (missing.length > 0) {
+      showToast({ type: 'warning', title: 'Select a Room', message: `${missing.length} selected order(s) have no room chosen.` });
+      return;
+    }
     setAssigning(true);
     try {
       const payload = selectedIds.map((id) => ({
         test_order_id: id,
-        destination_id: assignmentMap[id] || destinations[0].id,
+        lab_section: assignmentMap[id],
       }));
       await api.bulkAssign(payload);
       showToast({
         type: 'success',
         title: 'Bulk Assignment Complete',
-        message: `${payload.length} test orders routed to workstations.`,
+        message: `${payload.length} test orders routed to lab rooms.`,
       });
       setSelectedIds([]);
       fetchData();
@@ -131,10 +142,11 @@ export const AssignmentsPage: React.FC = () => {
         <div>
           <h1 className="text-xl font-bold text-[#1B1B0E]">Workstation Test Assignment</h1>
           <p className="text-xs text-[#6D6A60]">
-            Route pending diagnostic investigations to dedicated technician benches, analyzers, and rooms.
+            Route unassigned investigations to a lab room. Every active technician of that room can work them.
           </p>
         </div>
 
+        {view === 'UNASSIGNED' && (
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-white border border-[#CAC7BE] rounded-xl shadow-2xs">
             <Search className="w-4 h-4 text-[#8E8A7E]" />
@@ -159,7 +171,35 @@ export const AssignmentsPage: React.FC = () => {
             ))}
           </select>
         </div>
+        )}
       </div>
+
+      {/* Prompt 10F (F1): view switch */}
+      <div className="flex items-center gap-1.5" role="tablist" aria-label="Assignment views">
+        {([
+          { id: 'UNASSIGNED', label: `Unassigned (${unassigned.length})` },
+          { id: 'ASSIGNED', label: 'Assigned Tests' },
+        ] as const).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={view === t.id}
+            data-testid={`assignments-tab-${t.id}`}
+            onClick={() => setView(t.id)}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#CF8852] ${
+              view === t.id ? 'bg-[#525333] text-white shadow-xs' : 'bg-[#F4F3F0] text-[#54524A] hover:bg-[#E8E7E3]'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'ASSIGNED' ? (
+        <AssignedTestsPanel onChanged={fetchData} />
+      ) : (
+      <>
 
       {/* Bulk Action Bar (when selected) */}
       {selectedIds.length > 0 && (
@@ -200,7 +240,7 @@ export const AssignmentsPage: React.FC = () => {
                 <th className="pb-3">Investigation</th>
                 <th className="pb-3">Dept</th>
                 <th className="pb-3">Urgency</th>
-                <th className="pb-3">Target Workstation / Room</th>
+                <th className="pb-3">Lab Room</th>
                 <th className="pb-3 text-right pr-2">Action</th>
               </tr>
             </thead>
@@ -209,7 +249,7 @@ export const AssignmentsPage: React.FC = () => {
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-[#8E8A7E]">
                     <CheckCircle2 className="w-8 h-8 text-[#2D8A39] mx-auto mb-2 opacity-80" />
-                    All test orders have been assigned to laboratory workstations!
+                    All test orders have been routed to lab rooms!
                   </td>
                 </tr>
               )}
@@ -251,16 +291,22 @@ export const AssignmentsPage: React.FC = () => {
                     </td>
                     <td className="py-3">
                       <select
+                        aria-label={`Lab room for ${order.test_name}`}
+                        data-testid={`assign-room-select-${order.id}`}
                         value={assignmentMap[order.id] || ''}
                         onChange={(e) => handleSelectDestination(order.id, e.target.value)}
-                        className="bg-white border border-[#CAC7BE] rounded-lg px-2.5 py-1 text-xs font-semibold text-[#1B1B0E] max-w-[200px]"
+                        className="bg-white border border-[#CAC7BE] rounded-lg px-2.5 py-1 text-xs font-semibold text-[#1B1B0E] max-w-[220px]"
                       >
-                        {destinations.map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {d.name} {d.room_no ? `(Rm ${d.room_no})` : ''}
+                        <option value="">Select room…</option>
+                        {rooms.map((r) => (
+                          <option key={r.code} value={r.code}>
+                            {r.name} ({r.room}){r.active_technicians === 0 ? ' — no technician' : ''}
                           </option>
                         ))}
                       </select>
+                      {order.lab_section_label && (
+                        <div className="text-[10px] text-[#8E8A7E] mt-0.5">Waiting room: {order.lab_section_label}</div>
+                      )}
                     </td>
                     <td className="py-3 text-right pr-2">
                       <button
@@ -278,6 +324,8 @@ export const AssignmentsPage: React.FC = () => {
           </table>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 };

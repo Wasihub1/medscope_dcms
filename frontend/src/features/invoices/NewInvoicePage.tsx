@@ -23,6 +23,18 @@ import { Modal } from '../../components/common/Modal';
 import { Badge } from '../../components/common/Badge';
 import { DualCopyInvoiceModal, PreviewInvoiceData } from '../../components/common/DualCopyInvoiceModal';
 import { useToast } from '../../context/ToastContext';
+import { PAYMENT_CHANNEL_OPTIONS, isChannelDetailMissing, urgentFeePreview } from '../../utils/paymentChannels';
+
+/** Prompt 10E Part 3: visit demographics sent with the invoice (Finalize requires both). */
+type VisitGender = '' | 'Male' | 'Female' | 'Other';
+type AgeUnit = 'years' | 'months' | 'days';
+const toVisitGender = (g?: string | null): VisitGender => {
+  const v = (g || '').trim().toLowerCase();
+  if (v === 'male' || v === 'm') return 'Male';
+  if (v === 'female' || v === 'f') return 'Female';
+  if (v === 'other' || v === 'o') return 'Other';
+  return '';
+};
 
 interface SelectedTestLine {
   test: TestItem;
@@ -109,7 +121,27 @@ export const NewInvoicePage: React.FC = () => {
   const [paidAmount, setPaidAmount] = useState<number>(0);
   const [tenderedAmount, setTenderedAmount] = useState<number>(0);
   const [referenceNo, setReferenceNo] = useState<string>('');
+  const [channelDetail, setChannelDetail] = useState<string>(''); // Prompt 10E: name for OTHER
   const [notes, setNotes] = useState<string>('');
+
+  // Prompt 10E Part 3: age and gender for this visit (no silent defaults)
+  const [ageValue, setAgeValue] = useState<number | ''>('');
+  const [ageUnit, setAgeUnit] = useState<AgeUnit>('years');
+  const [visitGender, setVisitGender] = useState<VisitGender>('');
+
+  // Prompt 10E Part 3: prefill age/gender from the chosen patient (stored gender + latest visit age);
+  // the form can still change them before Finalize.
+  const choosePatient = (p: Patient) => {
+    setSelectedPatient(p);
+    setVisitGender(toVisitGender(p.gender));
+    if (p.last_age_value !== undefined && p.last_age_value !== null) {
+      setAgeValue(p.last_age_value);
+      setAgeUnit(((p.last_age_unit as AgeUnit) || 'years'));
+    } else {
+      setAgeValue('');
+      setAgeUnit('years');
+    }
+  };
 
   // 7. Preview & Save Modal State (Item 06 & Item 07)
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -117,6 +149,10 @@ export const NewInvoicePage: React.FC = () => {
   const [previewData, setPreviewData] = useState<PreviewInvoiceData | null>(null);
   const [savedInvoice, setSavedInvoice] = useState<Invoice | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Prompt 10D: Draft / Finalize state (a saved DRAFT has no invoice number and no operational effect)
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [draftLabel, setDraftLabel] = useState<string | null>(null);
 
   // Load Test Catalog
   useEffect(() => {
@@ -219,11 +255,69 @@ export const NewInvoicePage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const patientIdParam = searchParams.get('patient_id');
   const testIdParam = searchParams.get('test_id');
+  const draftIdParam = searchParams.get('draft_id');
+
+  // Prompt 10D: reopen a saved DRAFT for editing (/invoices/new?draft_id=:id)
+  useEffect(() => {
+    if (!draftIdParam || testCatalog.length === 0 || draftId === draftIdParam) return;
+    const loadDraft = async () => {
+      try {
+        const inv = await api.getInvoice(draftIdParam);
+        const payload = inv.draft_payload;
+        if (!inv.is_draft || !payload) {
+          showToast({ type: 'warning', title: 'Not a Draft', message: 'This invoice is already finalized and cannot be edited.' });
+          return;
+        }
+        const patient = await api.getPatient(payload.patient_id);
+        if (patient) setSelectedPatient(patient);
+        setSelectedPrescribedBy(
+          payload.prescribed_by_id ? ({ id: String(payload.prescribed_by_id), name: inv.prescribed_by_name || 'Doctor' } as unknown as Referrer) : null
+        );
+        setSelectedReferrer(
+          payload.referrer_id ? ({ id: String(payload.referrer_id), name: inv.referrer_name || 'Referrer' } as unknown as Referrer) : null
+        );
+        const restoredLines: SelectedTestLine[] = [];
+        for (const l of payload.lines || []) {
+          const test = testCatalog.find((t) => String(t.id) === String(l.test_id));
+          if (!test) continue;
+          const price = test.default_price || (test as any).price || 0;
+          const urgent = Boolean(l.urgent || l.is_urgent);
+          const dtype: DiscountType = l.discount_type === 'PERCENTAGE' ? 'PERCENT' : l.discount_type === 'AMOUNT' ? 'FIXED' : 'NONE';
+          restoredLines.push({
+            test: { ...test, default_price: price, discount_cap_percent: 100 },
+            price,
+            is_urgent: urgent,
+            urgent_fee: urgent ? urgentFeePreview(price) : 0,
+            discount_type: dtype,
+            discount_value: dtype === 'NONE' ? 0 : Number(l.discount_value || 0),
+          });
+        }
+        setSelectedLines(restoredLines);
+        const mdt = String(payload.master_discount_type || payload.bill_discount_type || 'NONE').toUpperCase();
+        const masterType: DiscountType = mdt === 'PERCENT' || mdt === 'PERCENTAGE' ? 'PERCENT' : mdt === 'FIXED' || mdt === 'AMOUNT' ? 'FIXED' : 'NONE';
+        setMasterDiscountType(masterType);
+        setMasterDiscountValue(masterType === 'NONE' ? 0 : Number(payload.master_discount_value ?? payload.bill_discount_value ?? 0));
+        setPaidAmount(Number(payload.initial_payment_amount || 0));
+        setPaymentChannel((payload.initial_payment_method || 'CASH') as PaymentChannel);
+        setReferenceNo(payload.initial_payment_reference || '');
+        setChannelDetail(payload.initial_payment_channel_detail || '');
+        setAgeValue(payload.age_value ?? '');
+        setAgeUnit(((payload.age_unit as AgeUnit) || 'years'));
+        setVisitGender(toVisitGender(payload.gender));
+        setNotes(payload.notes || '');
+        setDraftId(String(inv.id));
+        setDraftLabel(inv.invoice_number || null);
+      } catch (err: any) {
+        showToast({ type: 'error', title: 'Failed to open draft', message: err.message });
+      }
+    };
+    loadDraft();
+  }, [draftIdParam, testCatalog]);
 
   useEffect(() => {
     if (patientIdParam && !selectedPatient) {
       api.getPatient(patientIdParam).then((p) => {
-        if (p) setSelectedPatient(p);
+        if (p) choosePatient(p);
       }).catch((err) => console.error('Failed to preselect patient:', err));
     }
   }, [patientIdParam]);
@@ -265,7 +359,7 @@ export const NewInvoicePage: React.FC = () => {
       prev.map((line, idx) => {
         if (idx !== index) return line;
         const nextUrgent = !line.is_urgent;
-        const fee = nextUrgent ? Math.max(100, Math.round(line.price * 0.2)) : 0;
+        const fee = nextUrgent ? urgentFeePreview(line.price) : 0;
         return { ...line, is_urgent: nextUrgent, urgent_fee: fee };
       })
     );
@@ -394,6 +488,15 @@ export const NewInvoicePage: React.FC = () => {
       });
       setSelectedPatient(created);
       setPatientModalOpen(false);
+      // Prompt 10E: the patient table stores no age; carry the form's age into this visit
+      setVisitGender(toVisitGender(newPatient.gender));
+      if (newPatient.age_years !== '') {
+        setAgeValue(Number(newPatient.age_years));
+        setAgeUnit('years');
+      } else if (newPatient.age_months !== '') {
+        setAgeValue(Number(newPatient.age_months));
+        setAgeUnit('months');
+      }
       showToast({ type: 'success', title: 'Patient Created', message: `${created.full_name} (${created.mrn})` });
     } catch (err: any) {
       showToast({ type: 'error', title: 'Creation Failed', message: err.message });
@@ -519,8 +622,8 @@ export const NewInvoicePage: React.FC = () => {
       patient_name: selectedPatient.full_name,
       patient_mrn: selectedPatient.mrn,
       patient_phone: selectedPatient.phone,
-      patient_gender: selectedPatient.gender,
-      patient_age_display: selectedPatient.age_years ? `${selectedPatient.age_years}y` : undefined,
+      patient_gender: (visitGender || selectedPatient.gender) as any,
+      patient_age_display: ageValue !== '' ? `${ageValue} ${ageUnit}` : undefined,
       prescribed_by_name: selectedPrescribedBy?.name || 'Self / Walk-in',
       referrer_name: selectedReferrer?.name || 'Self / Walk-in',
       lines: linesPreview,
@@ -533,6 +636,7 @@ export const NewInvoicePage: React.FC = () => {
       paid_amount: paidAmount,
       due_amount: dueAmount,
       payment_channel: paymentChannel,
+      payment_channel_detail: paymentChannel === 'OTHER' ? channelDetail.trim() : undefined,
       reference_no: referenceNo,
       notes: notes,
     };
@@ -541,44 +645,85 @@ export const NewInvoicePage: React.FC = () => {
     setPreviewOpen(true);
   };
 
-  // Item 06 & Item 07: Save / Save & Print Invoice (final persistence + clean reset)
-  const handleCommitInvoice = async (triggerPrintAfterSave: boolean) => {
+  // Prompt 10D: one payload builder for Save Draft and Finalize
+  const buildInvoicePayload = () => {
+    return {
+      patient_id: Number(selectedPatient?.id),
+      prescribed_by_id: selectedPrescribedBy ? Number(selectedPrescribedBy.id) : null,
+      referrer_id: selectedReferrer ? Number(selectedReferrer.id) : null,
+      notes: notes || null,
+      // Prompt 10E Part 3: visit demographics (a draft may leave them empty; Finalize requires both)
+      age_value: ageValue === '' ? null : Number(ageValue),
+      age_unit: ageUnit,
+      gender: visitGender || null,
+      master_discount_type: masterDiscountType,
+      master_discount_value: masterDiscountValue,
+      lines: selectedLines.map((line) => ({
+        test_id: Number(line.test.id),
+        is_urgent: line.is_urgent,
+        discount_type: line.discount_type,
+        discount_value: line.discount_value,
+      })),
+      initial_payment:
+        paidAmount > 0
+          ? {
+              amount: paidAmount,
+              channel: paymentChannel,
+              reference_no: referenceNo || null,
+              channel_detail: paymentChannel === 'OTHER' ? channelDetail.trim() : null,
+              notes: 'Reception desk initial payment',
+            }
+          : null,
+    };
+  };
+
+  // Prompt 10D: Save Draft — stores the form as a DRAFT (no invoice number, no orders, no payment)
+  const handleSaveDraft = async () => {
     if (!selectedPatient || selectedLines.length === 0) return;
     setSubmitting(true);
     try {
-      const payload = {
-        patient_id: Number(selectedPatient.id),
-        prescribed_by_id: selectedPrescribedBy ? Number(selectedPrescribedBy.id) : null,
-        referrer_id: selectedReferrer ? Number(selectedReferrer.id) : null,
-        notes: notes || null,
-        master_discount_type: masterDiscountType,
-        master_discount_value: masterDiscountValue,
-        lines: selectedLines.map((line) => ({
-          test_id: Number(line.test.id),
-          is_urgent: line.is_urgent,
-          discount_type: line.discount_type,
-          discount_value: line.discount_value,
-        })),
-        initial_payment:
-          paidAmount > 0
-            ? {
-                amount: paidAmount,
-                channel: paymentChannel,
-                reference_no: referenceNo || null,
-                notes: 'Reception desk initial payment',
-              }
-            : null,
-      };
+      const payload = buildInvoicePayload();
+      const saved = draftId ? await api.updateInvoiceDraft(draftId, payload) : await api.createInvoiceDraft(payload);
+      setDraftId(String(saved.id));
+      setDraftLabel(saved.invoice_number || null);
+      showToast({
+        type: 'success',
+        title: 'Draft Saved',
+        message: `Draft ${saved.invoice_number} saved. It has no effect until you press Finalize.`,
+      });
+    } catch (err: any) {
+      showToast({ type: 'error', title: 'Draft Save Failed', message: err.message });
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
-      const result = await api.createInvoice(payload);
+  // Item 06 & Item 07 (+ Prompt 10D): Finalize / Finalize & Print (final persistence + clean reset)
+  const handleCommitInvoice = async (triggerPrintAfterSave: boolean) => {
+    if (!selectedPatient || selectedLines.length === 0) return;
+    if (ageValue === '' || !visitGender) {
+      showToast({ type: 'warning', title: 'Age and Gender Required', message: 'Enter the patient age and gender to finalize. You can still Save Draft without them.' });
+      return;
+    }
+    if (paidAmount > 0 && isChannelDetailMissing(paymentChannel, channelDetail)) {
+      showToast({ type: 'warning', title: 'Channel Name Required', message: 'Type the name of the payment channel for "Other".' });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const payload = buildInvoicePayload();
+      // Finalize: a saved draft is finalized in place; an unsaved form is created and finalized at once.
+      const result = draftId ? await api.finalizeInvoice(draftId, payload) : await api.createInvoice(payload);
+      setDraftId(null);
+      setDraftLabel(null);
       setSavedInvoice(result);
       setPreviewOpen(false);
       setSavedModalOpen(true);
 
       showToast({
         type: 'success',
-        title: 'Invoice Created!',
-        message: `Bill #${result.invoice_number} saved successfully.`,
+        title: 'Invoice Finalized!',
+        message: `Bill #${result.invoice_number} finalized successfully.`,
       });
 
       // Item 07: Clean reset of invoice form ONLY after successful persistence
@@ -591,7 +736,11 @@ export const NewInvoicePage: React.FC = () => {
       setPaidAmount(0);
       setTenderedAmount(0);
       setReferenceNo('');
+      setChannelDetail('');
       setNotes('');
+      setAgeValue('');
+      setAgeUnit('years');
+      setVisitGender('');
 
       if (triggerPrintAfterSave) {
         setTimeout(() => {
@@ -674,10 +823,46 @@ export const NewInvoicePage: React.FC = () => {
                       {selectedPatient.mrn}
                     </Badge>
                   </div>
-                  <p className="text-xs text-[#444529] mt-0.5">
-                    Phone: {selectedPatient.phone} | Gender: {selectedPatient.gender} | Age:{' '}
-                    {selectedPatient.age_years ? `${selectedPatient.age_years}y` : '-'}
-                  </p>
+                  <p className="text-xs text-[#444529] mt-0.5">Phone: {selectedPatient.phone}</p>
+                  {/* Prompt 10E Part 3: age and gender for this visit (required to finalize) */}
+                  <div className="flex flex-wrap items-center gap-2 mt-2 text-xs" data-testid="visit-demographics">
+                    <label className="text-[11px] font-semibold text-[#444529]" htmlFor="visit-age-input">Age *</label>
+                    <input
+                      id="visit-age-input"
+                      data-testid="visit-age-input"
+                      type="number"
+                      min={0}
+                      max={ageUnit === 'years' ? 130 : ageUnit === 'months' ? 1560 : 47450}
+                      step={1}
+                      value={ageValue}
+                      onChange={(e) => setAgeValue(e.target.value === '' ? '' : Math.max(0, Math.floor(Number(e.target.value))))}
+                      className="w-16 bg-white border border-[#C2C6A4] rounded-lg px-2 py-1 text-xs"
+                    />
+                    <select
+                      aria-label="Age unit"
+                      data-testid="visit-age-unit"
+                      value={ageUnit}
+                      onChange={(e) => setAgeUnit(e.target.value as AgeUnit)}
+                      className="bg-white border border-[#C2C6A4] rounded-lg px-2 py-1 text-xs cursor-pointer"
+                    >
+                      <option value="years">years</option>
+                      <option value="months">months</option>
+                      <option value="days">days</option>
+                    </select>
+                    <label className="text-[11px] font-semibold text-[#444529] ml-1" htmlFor="visit-gender-select">Gender *</label>
+                    <select
+                      id="visit-gender-select"
+                      data-testid="visit-gender-select"
+                      value={visitGender}
+                      onChange={(e) => setVisitGender(e.target.value as VisitGender)}
+                      className="bg-white border border-[#C2C6A4] rounded-lg px-2 py-1 text-xs cursor-pointer"
+                    >
+                      <option value="">Select…</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -707,7 +892,7 @@ export const NewInvoicePage: React.FC = () => {
                         key={p.id}
                         data-testid={`patient-result-${p.id}`}
                         onClick={() => {
-                          setSelectedPatient(p);
+                          choosePatient(p);
                           setPatientSearch('');
                           setPatientResults([]);
                         }}
@@ -1183,16 +1368,15 @@ export const NewInvoicePage: React.FC = () => {
                   <div>
                     <label className="text-[11px] text-[#6D6A60] block mb-1">Payment Method</label>
                     <select
+                      data-testid="payment-method-select"
+                      aria-label="Payment method"
                       value={paymentChannel}
                       onChange={(e) => setPaymentChannel(e.target.value as PaymentChannel)}
                       className="w-full bg-[#FAF9F6] border border-[#CAC7BE] rounded-lg px-2.5 py-1.5 font-semibold text-xs text-[#1B1B0E] cursor-pointer"
                     >
-                      <option value="CASH">Cash</option>
-                      <option value="BKASH">bKash</option>
-                      <option value="NAGAD">Nagad</option>
-                      <option value="ROCKET">Rocket</option>
-                      <option value="CARD">Debit / Credit Card</option>
-                      <option value="BANK_TRANSFER">Bank Transfer</option>
+                      {PAYMENT_CHANNEL_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
                     </select>
                   </div>
 
@@ -1228,6 +1412,22 @@ export const NewInvoicePage: React.FC = () => {
                         ৳{changeAmount.toLocaleString()}
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {paymentChannel === 'OTHER' && paidAmount > 0 && (
+                  <div>
+                    <label className="text-[11px] text-[#6D6A60] block mb-1" htmlFor="channel-detail-input">Channel Name *</label>
+                    <input
+                      id="channel-detail-input"
+                      data-testid="channel-detail-input"
+                      type="text"
+                      maxLength={100}
+                      value={channelDetail}
+                      onChange={(e) => setChannelDetail(e.target.value)}
+                      placeholder="e.g. Upay, Cheque"
+                      className="w-full bg-[#FAF9F6] border border-[#CAC7BE] rounded-lg px-2.5 py-1.5 text-xs"
+                    />
                   </div>
                 )}
 
@@ -1684,6 +1884,8 @@ export const NewInvoicePage: React.FC = () => {
         onBack={() => setPreviewOpen(false)}
         onSave={() => handleCommitInvoice(false)}
         onSaveAndPrint={() => handleCommitInvoice(true)}
+        onSaveDraft={handleSaveDraft}
+        draftLabel={draftLabel}
         saving={submitting}
       />
 
